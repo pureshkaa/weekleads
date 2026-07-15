@@ -63,12 +63,7 @@
     22%{opacity:0; transform:translate(460px,150px) rotate(-18deg);}
     100%{opacity:0;}
   }
-  .planet{position:absolute; border-radius:50%; filter:blur(2px); opacity:.55; animation:drift linear infinite;}
-  @keyframes drift{
-    0%{ transform:translate(0,0) rotate(0deg); }
-    50%{ transform:translate(60px,-40px) rotate(180deg); }
-    100%{ transform:translate(0,0) rotate(360deg); }
-  }
+
 
   /* ===== Archive banner ===== */
   .archive-banner{
@@ -549,24 +544,6 @@ function buildStarfield(){
     sh.style.animationDelay = (Math.random()*12).toFixed(1)+'s';
     field.appendChild(sh);
   }
-  const planetColors = [
-    'radial-gradient(circle at 32% 32%, #a855f7, #3b0764 70%)',
-    'radial-gradient(circle at 32% 32%, #22d3ee, #063842 70%)',
-    'radial-gradient(circle at 32% 32%, #ec4899, #4a0a29 70%)',
-    'radial-gradient(circle at 32% 32%, #34e0a1, #063a2c 70%)'
-  ];
-  for(let i=0;i<5;i++){
-    const p = document.createElement('div');
-    p.className = 'planet';
-    const size = 70 + Math.random()*130;
-    p.style.width = size+'px'; p.style.height = size+'px';
-    p.style.left = (Math.random()*95)+'%';
-    p.style.top = (Math.random()*95)+'%';
-    p.style.background = planetColors[i % planetColors.length];
-    p.style.animationDuration = (30 + Math.random()*50).toFixed(0)+'s';
-    p.style.animationDelay = (Math.random()*10).toFixed(1)+'s';
-    field.appendChild(p);
-  }
 }
 
 /* ===== Данные ===== */
@@ -772,6 +749,11 @@ function renderFutureQuotaSidebar(){
 }
 
 /* ===== Графики ===== */
+const WEEKDAY_SHORT = ['ВС','ПН','ВТ','СР','ЧТ','ПТ','СБ'];
+function weekdayFor(date){
+  if(!date) return '';
+  return WEEKDAY_SHORT[date.getUTCDay()];
+}
 function groupByDate(leads){
   const byDate = {};
   leads.forEach(l => {
@@ -782,6 +764,7 @@ function groupByDate(leads){
   });
   const days = Object.keys(byDate).map(k => ({ label:k, ...byDate[k] }));
   days.sort((a,b) => (a.date||0) - (b.date||0));
+  days.forEach(d => { d.weekday = weekdayFor(d.date); });
   return days;
 }
 function groupByManager(leads){
@@ -852,7 +835,7 @@ function renderChartLine(wrap, weekLeads){
         ${isLast ? `<circle cx="${x}" cy="${y}" r="12" fill="${color}" opacity="0.25"><animate attributeName="r" values="10;16;10" dur="2s" repeatCount="indefinite"/></circle>` : ''}
         <circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="var(--panel)" stroke-width="2" style="filter:drop-shadow(0 0 6px ${color})"/>
         <text x="${x}" y="${y-18}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="14" fill="var(--text)">${d.total}</text>
-        <text x="${x}" y="${padTop+chartH+22}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-dim)">${escapeHtml(d.label)}</text>
+        <text x="${x}" y="${padTop+chartH+22}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-dim)">${escapeHtml(d.label)} · ${d.weekday}</text>
       </g>`;
   });
 
@@ -905,7 +888,7 @@ function renderChartBar(wrap, weekLeads){
       <g>
         <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="8" fill="${color}" opacity="0.85" style="filter:drop-shadow(0 0 6px ${color})"/>
         <text x="${x+barW/2}" y="${y-10}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="14" fill="var(--text)">${d.total}</text>
-        <text x="${x+barW/2}" y="${padTop+chartH+22}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-dim)">${escapeHtml(d.label)}</text>
+        <text x="${x+barW/2}" y="${padTop+chartH+22}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-dim)">${escapeHtml(d.label)} · ${d.weekday}</text>
       </g>`;
   });
 
