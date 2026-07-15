@@ -754,6 +754,10 @@ function weekdayFor(date){
   if(!date) return '';
   return WEEKDAY_SHORT[date.getUTCDay()];
 }
+function shortDate(label){
+  const parts = String(label||'').split('.');
+  return parts.length >= 2 ? (parts[0] + '.' + parts[1]) : String(label||'');
+}
 function groupByDate(leads){
   const byDate = {};
   leads.forEach(l => {
@@ -796,7 +800,7 @@ function renderChartLine(wrap, weekLeads){
   const maxVal = Math.max(...days.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
 
-  const stepX = 96, padX = 46, padTop = 30, padBottom = 34, chartH = 220;
+  const stepX = 110, padX = 46, padTop = 30, padBottom = 50, chartH = 220;
   const svgW = Math.max(520, days.length * stepX + padX*2);
   const svgH = padTop + chartH + padBottom;
   const xFor = i => padX + i*stepX;
@@ -835,7 +839,8 @@ function renderChartLine(wrap, weekLeads){
         ${isLast ? `<circle cx="${x}" cy="${y}" r="12" fill="${color}" opacity="0.25"><animate attributeName="r" values="10;16;10" dur="2s" repeatCount="indefinite"/></circle>` : ''}
         <circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="var(--panel)" stroke-width="2" style="filter:drop-shadow(0 0 6px ${color})"/>
         <text x="${x}" y="${y-18}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="14" fill="var(--text)">${d.total}</text>
-        <text x="${x}" y="${padTop+chartH+22}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-dim)">${escapeHtml(d.label)} · ${d.weekday}</text>
+        <text x="${x}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">${d.weekday}</text>
+        <text x="${x}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>
       </g>`;
   });
 
@@ -865,7 +870,7 @@ function renderChartBar(wrap, weekLeads){
   const maxVal = Math.max(...days.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
 
-  const barW = 52, stepX = 96, padX = 46, padTop = 30, padBottom = 34, chartH = 220;
+  const barW = 52, stepX = 110, padX = 46, padTop = 30, padBottom = 50, chartH = 220;
   const svgW = Math.max(520, days.length * stepX + padX*2);
   const svgH = padTop + chartH + padBottom;
   const xFor = i => padX + i*stepX;
@@ -888,7 +893,8 @@ function renderChartBar(wrap, weekLeads){
       <g>
         <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="8" fill="${color}" opacity="0.85" style="filter:drop-shadow(0 0 6px ${color})"/>
         <text x="${x+barW/2}" y="${y-10}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="14" fill="var(--text)">${d.total}</text>
-        <text x="${x+barW/2}" y="${padTop+chartH+22}" text-anchor="middle" font-family="var(--mono)" font-size="10" fill="var(--text-dim)">${escapeHtml(d.label)} · ${d.weekday}</text>
+        <text x="${x+barW/2}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">${d.weekday}</text>
+        <text x="${x+barW/2}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>
       </g>`;
   });
 
