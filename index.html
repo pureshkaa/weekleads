@@ -793,6 +793,8 @@ function groupByDate(leads){
 
   const days = [];
   for(let d = new Date(startDate); d <= endDate; d.setUTCDate(d.getUTCDate()+1)){
+    const dow = d.getUTCDay();
+    if(dow === 0 || dow === 6) continue; // пропускаем сб/вс — нерабочие дни
     const label = formatDateLabel(d);
     const bucket = byDate[label] || { total:0, ads:0 };
     days.push({ label, total: bucket.total, ads: bucket.ads, date: new Date(d), weekday: weekdayFor(d) });
