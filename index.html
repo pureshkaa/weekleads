@@ -758,6 +758,19 @@ function shortDate(label){
   const parts = String(label||'').split('.');
   return parts.length >= 2 ? (parts[0] + '.' + parts[1]) : String(label||'');
 }
+function formatDateLabel(d){
+  const dd = String(d.getUTCDate()).padStart(2,'0');
+  const mm = String(d.getUTCMonth()+1).padStart(2,'0');
+  const yyyy = d.getUTCFullYear();
+  return `${dd}.${mm}.${yyyy}`;
+}
+function mostRecentThursday(date){
+  const day = date.getUTCDay(); // 0=Вс,1=Пн,...4=Чт,...6=Сб
+  const diff = (day - 4 + 7) % 7;
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() - diff);
+  return d;
+}
 function groupByDate(leads){
   const byDate = {};
   leads.forEach(l => {
@@ -766,9 +779,24 @@ function groupByDate(leads){
     byDate[key].total++;
     if(l.type === 'Реклама') byDate[key].ads++;
   });
-  const days = Object.keys(byDate).map(k => ({ label:k, ...byDate[k] }));
-  days.sort((a,b) => (a.date||0) - (b.date||0));
-  days.forEach(d => { d.weekday = weekdayFor(d.date); });
+
+  const validDates = Object.values(byDate).map(d=>d.date).filter(Boolean);
+  if(!validDates.length){
+    return Object.keys(byDate).map(k => ({ label:k, weekday:'', ...byDate[k] }));
+  }
+  const minDate = new Date(Math.min(...validDates));
+  const maxDate = new Date(Math.max(...validDates));
+  const startDate = mostRecentThursday(minDate);
+  let endDate = new Date(startDate);
+  endDate.setUTCDate(endDate.getUTCDate() + 6);
+  if(maxDate > endDate) endDate = new Date(maxDate);
+
+  const days = [];
+  for(let d = new Date(startDate); d <= endDate; d.setUTCDate(d.getUTCDate()+1)){
+    const label = formatDateLabel(d);
+    const bucket = byDate[label] || { total:0, ads:0 };
+    days.push({ label, total: bucket.total, ads: bucket.ads, date: new Date(d), weekday: weekdayFor(d) });
+  }
   return days;
 }
 function groupByManager(leads){
