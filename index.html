@@ -284,6 +284,17 @@
   .mini-btn:hover{color:var(--accent); border-color:var(--accent-dim);}
   .block-row select{background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:3px; padding:3px 4px; font-size:11px;}
 
+  .theme-grid{display:flex; flex-direction:column; gap:8px;}
+  .theme-card{
+    display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
+    border:1px solid var(--line); background:var(--bg); cursor:pointer; transition:all .15s ease;
+  }
+  .theme-card:hover{border-color:var(--accent-dim);}
+  .theme-card.active{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent);}
+  .theme-card .swatches{display:flex; gap:4px;}
+  .theme-card .swatches span{width:16px; height:16px; border-radius:50%; display:inline-block; border:1px solid rgba(255,255,255,.15);}
+  .theme-card .theme-name{font-family:var(--sans); font-weight:700; font-size:13px; color:var(--text);}
+
   .history-list{padding:2px 0 6px;}
   .history-row{display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-family:var(--mono); font-size:10.5px; color:var(--text-dim); cursor:pointer; transition:color .15s ease;}
   .history-row:hover{color:var(--accent);}
@@ -380,6 +391,27 @@
 <div class="drawer" id="drawer">
   <button class="drawer-close" id="drawerClose">×</button>
 
+  <h3>Быстрые настройки</h3>
+  <div class="field-row">
+    <label>Ширина дашборда</label>
+    <select id="widthSelect">
+      <option value="1150">Узкая</option>
+      <option value="1400" selected>Обычная</option>
+      <option value="1650">Широкая</option>
+      <option value="2000">Во всю ширину</option>
+    </select>
+  </div>
+  <div class="field-row"><label>Компактный режим</label><input type="checkbox" id="compactToggle"></div>
+  <div class="field-row"><label>Отступы</label><input type="range" id="gapSize" min="6" max="22" value="14"></div>
+  <div class="field-row">
+    <label>Размер шрифта</label>
+    <div class="font-btns">
+      <button id="fontMinus2">-2</button><button id="fontMinus1">-1</button>
+      <button id="fontPlus1">+1</button><button id="fontPlus2">+2</button>
+    </div>
+  </div>
+  <div class="field-row"><label>Точный размер шрифта</label><input type="range" id="fontSize" min="10" max="22" value="14"></div>
+
   <h3>Подключение</h3>
   <div class="config-box">
     <label>Apps Script URL (.../exec)</label><br>
@@ -392,37 +424,9 @@
   <h3>История сохранённых недель</h3>
   <div class="history-list" id="historyList"></div>
 
-  <h3>Внешний вид</h3>
-  <div class="field-row"><label>Акцент 1 (циан)</label><input type="color" id="colorAccent"></div>
-  <div class="field-row"><label>Акцент 2 (фиолет)</label><input type="color" id="colorAccent2"></div>
-  <div class="field-row"><label>Акцент 3 (розовый)</label><input type="color" id="colorAccent3"></div>
-  <div class="field-row"><label>Цвет "выше" (рост)</label><input type="color" id="colorOk"></div>
-  <div class="field-row"><label>Цвет "ниже" (спад)</label><input type="color" id="colorWarn"></div>
-  <div class="field-row"><label>Цвет фона</label><input type="color" id="colorBg"></div>
-  <div class="field-row"><label>Цвет панелей</label><input type="color" id="colorPanel"></div>
-  <div class="field-row"><label>Цвет текста</label><input type="color" id="colorText"></div>
-  <div class="field-row"><label>Прозрачность панелей</label><input type="range" id="panelAlpha" min="30" max="100" value="62"></div>
-
-  <h3>Типографика</h3>
-  <div class="field-row">
-    <label>Размер шрифта</label>
-    <div class="font-btns">
-      <button id="fontMinus2">-2</button><button id="fontMinus1">-1</button>
-      <button id="fontPlus1">+1</button><button id="fontPlus2">+2</button>
-    </div>
-  </div>
-  <div class="field-row"><label>Точный размер</label><input type="range" id="fontSize" min="10" max="22" value="14"></div>
-  <div class="field-row"><label>Отступы</label><input type="range" id="gapSize" min="6" max="22" value="14"></div>
-  <div class="field-row">
-    <label>Ширина дашборда</label>
-    <select id="widthSelect">
-      <option value="1150">Узкая</option>
-      <option value="1400" selected>Обычная</option>
-      <option value="1650">Широкая</option>
-      <option value="2000">Во всю ширину</option>
-    </select>
-  </div>
-  <div class="field-row"><label>Компактный режим</label><input type="checkbox" id="compactToggle"></div>
+  <h3>Цветовая тема</h3>
+  <div class="theme-grid" id="themeGrid"></div>
+  <div class="field-row" style="margin-top:14px;"><label>Прозрачность панелей</label><input type="range" id="panelAlpha" min="30" max="100" value="62"></div>
 
   <h3>Обновление</h3>
   <div class="field-row">
@@ -465,8 +469,17 @@ const DEFAULT_BLOCKS = [
   { id:'leadslist',name:'Список лидов', visible:true, width:'full' },
   { id:'thesis',   name:'Итоги недели (сделано/планы)', visible:false, width:'full' }
 ];
+const THEME_PRESETS = [
+  { id:'neon',    name:'Неон (циан/фиолет)', accent:'#22d3ee', accent2:'#a855f7', accent3:'#ec4899', ok:'#34e0a1', warn:'#ff5d7a', bg:'#05070f', panel:'#12162a', text:'#eef0fb' },
+  { id:'ocean',   name:'Океан', accent:'#38bdf8', accent2:'#6366f1', accent3:'#06b6d4', ok:'#2dd4bf', warn:'#fb7185', bg:'#030b16', panel:'#0f1b2d', text:'#e6f1fb' },
+  { id:'sunset',  name:'Закат', accent:'#fb923c', accent2:'#f472b6', accent3:'#facc15', ok:'#4ade80', warn:'#ef4444', bg:'#170a08', panel:'#2a1410', text:'#fff1e6' },
+  { id:'forest',  name:'Лес', accent:'#4ade80', accent2:'#22c55e', accent3:'#a3e635', ok:'#34d399', warn:'#f87171', bg:'#06120b', panel:'#0f2016', text:'#eafbf1' },
+  { id:'mono',    name:'Монохром', accent:'#cbd5e1', accent2:'#94a3b8', accent3:'#e2e8f0', ok:'#4ade80', warn:'#f87171', bg:'#0a0a0c', panel:'#17181d', text:'#f1f1f4' },
+  { id:'cosmos',  name:'Космос', accent:'#818cf8', accent2:'#c084fc', accent3:'#f472b6', ok:'#34d399', warn:'#fb7185', bg:'#07040f', panel:'#150f27', text:'#ede9fe' }
+];
 const DEFAULT_SETTINGS = {
   apiUrl: DEFAULT_API_URL,
+  theme: 'neon',
   accent:'#22d3ee', accent2:'#a855f7', accent3:'#ec4899', ok:'#34e0a1', warn:'#ff5d7a',
   bg:'#05070f', panel:'#12162a', text:'#eef0fb', panelAlpha:62,
   fontSize:14, gap:14, width:1400, compact:false, pollInterval:20000,
@@ -501,14 +514,6 @@ function applySettings(){
   document.body.classList.toggle('compact', !!settings.compact);
 
   document.getElementById('apiUrlInput').value = settings.apiUrl;
-  document.getElementById('colorAccent').value = settings.accent;
-  document.getElementById('colorAccent2').value = settings.accent2;
-  document.getElementById('colorAccent3').value = settings.accent3;
-  document.getElementById('colorOk').value = settings.ok;
-  document.getElementById('colorWarn').value = settings.warn;
-  document.getElementById('colorBg').value = settings.bg;
-  document.getElementById('colorPanel').value = settings.panel;
-  document.getElementById('colorText').value = settings.text;
   document.getElementById('panelAlpha').value = settings.panelAlpha;
   document.getElementById('fontSize').value = settings.fontSize;
   document.getElementById('gapSize').value = settings.gap;
@@ -516,6 +521,29 @@ function applySettings(){
   document.getElementById('compactToggle').checked = !!settings.compact;
   document.getElementById('pollInterval').value = settings.pollInterval;
   renderBlockList();
+  renderThemeGrid();
+}
+function renderThemeGrid(){
+  const box = document.getElementById('themeGrid');
+  if(!box) return;
+  box.innerHTML = THEME_PRESETS.map(t => `
+    <div class="theme-card ${settings.theme===t.id?'active':''}" data-theme="${t.id}">
+      <div class="swatches">
+        <span style="background:${t.accent}"></span>
+        <span style="background:${t.accent2}"></span>
+        <span style="background:${t.accent3}"></span>
+      </div>
+      <span class="theme-name">${t.name}</span>
+    </div>
+  `).join('');
+  box.querySelectorAll('.theme-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const preset = THEME_PRESETS.find(t => t.id === card.dataset.theme);
+      if(!preset) return;
+      Object.assign(settings, { theme:preset.id, accent:preset.accent, accent2:preset.accent2, accent3:preset.accent3, ok:preset.ok, warn:preset.warn, bg:preset.bg, panel:preset.panel, text:preset.text });
+      applySettings(); saveSettings(); renderChart();
+    });
+  });
 }
 function apiUrl(){ return settings.apiUrl || DEFAULT_API_URL; }
 
@@ -1229,9 +1257,6 @@ function bindStaticUI(){
     });
   };
   bind('apiUrlInput','apiUrl');
-  bind('colorAccent','accent'); bind('colorAccent2','accent2'); bind('colorAccent3','accent3');
-  bind('colorOk','ok'); bind('colorWarn','warn');
-  bind('colorBg','bg'); bind('colorPanel','panel'); bind('colorText','text');
   bind('panelAlpha','panelAlpha', v=>Number(v));
   bind('fontSize','fontSize', v=>Number(v));
   bind('gapSize','gap', v=>Number(v));
