@@ -443,7 +443,7 @@
 </div>
 
 <script>
-const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbwokZ1Q1hhxeM6fTzpo3oPkpEXZ8_6zpJRCRFgtzTWbltJ2KcakqALVvK4drOUoZTT-0Q/exec';
+const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbze9mhoL8826pX4nXigQ7ct4foPS2VXZfoGcwNyj05_kVYYjM4eeBvE2AJAG-qGJABuEg/exec';
 
 let state = { leads: [], managers: [] };
 let saveTimers = {};
@@ -577,6 +577,7 @@ async function fetchData(){
     weekState.lastSavedNumber = Number(data.lastSavedNumber) || 0;
     weekState.notes = data.notes || { done:[], plans:[] };
     weekState.history = data.history || [];
+    viewSnapshot = data.viewing ? (weekState.history.find(h => h.savedAt === data.viewing) || null) : null;
     renderAll();
     setStatus('live');
     document.getElementById('updatedAtPill').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
@@ -1067,9 +1068,9 @@ function renderHistory(){
   box.querySelectorAll('.history-row').forEach(row => {
     row.addEventListener('click', (e) => {
       if(e.target.classList.contains('history-del')) return;
-      viewSnapshot = weekState.history[Number(row.dataset.idx)];
+      const snap = weekState.history[Number(row.dataset.idx)];
       toggleDrawer(false);
-      renderAll();
+      setViewing(snap.savedAt);
     });
   });
   box.querySelectorAll('.history-del').forEach(el => {
@@ -1086,15 +1087,30 @@ async function deleteHistoryEntry(idx){
     ? 'Удалить последнее сохранение? Текущая неделя снова будет считаться с этой границы номеров — лиды, посчитанные в этой записи, опять станут "текущей неделей".'
     : 'Удалить эту запись из истории? На подсчёт текущей недели это не повлияет.';
   if(!confirm(msg)) return;
-  weekState.history.splice(idx, 1);
-  if(isLatest){
-    weekState.lastSavedNumber = weekState.history[0] ? weekState.history[0].toNumber : 0;
-  }
-  if(viewSnapshot && !weekState.history.includes(viewSnapshot)) viewSnapshot = null;
+  const newHistory = weekState.history.slice();
+  newHistory.splice(idx, 1);
+  const newLastSavedNumber = isLatest ? (newHistory[0] ? newHistory[0].toNumber : 0) : weekState.lastSavedNumber;
   try{
-    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'setWeekState', lastSavedNumber: weekState.lastSavedNumber, history: weekState.history }) });
-  }catch(e){ console.error('setWeekState failed', e); }
-  renderAll();
+    const res = await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'setWeekState', lastSavedNumber: newLastSavedNumber, history: newHistory }) });
+    const result = await res.json();
+    if(!result || !result.ok){ alert('Сервер не подтвердил изменение. Проверьте, что бэкенд Apps Script обновлён (см. инструкцию) и передеплоен.'); return; }
+  }catch(e){
+    alert('Не удалось связаться с сервером: ' + e.message);
+    return;
+  }
+  await fetchData();
+}
+
+async function setViewing(savedAtOrNull){
+  try{
+    const res = await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'setViewing', viewing: savedAtOrNull }) });
+    const result = await res.json();
+    if(!result || !result.ok){ alert('Сервер не подтвердил переключение недели. Проверьте, что бэкенд Apps Script обновлён и передеплоен.'); return; }
+  }catch(e){
+    alert('Не удалось связаться с сервером: ' + e.message);
+    return;
+  }
+  await fetchData();
 }
 
 /* ===== Взаимодействие ===== */
@@ -1180,10 +1196,15 @@ function queueNotesSave(){ clearTimeout(saveTimers['__notes']); saveTimers['__no
 async function doSaveNotes(){
   const done = document.getElementById('doneEdit').value.split('\n').map(s=>s.trim()).filter(Boolean);
   const plans = document.getElementById('plansEdit').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  weekState.notes = { done, plans };
+  const notes = { done, plans };
+  weekState.notes = notes; // мгновенный локальный отклик, пока ждём сервер
   renderThesis();
   try{
-    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveNotes', notes: weekState.notes }) });
+    const res = await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveNotes', notes }) });
+    const result = await res.json();
+    if(!result || !result.ok){
+      console.error('saveNotes: сервер не подтвердил сохранение', result);
+    }
   }catch(e){ console.error('Notes save failed', e); }
 }
 
@@ -1207,13 +1228,17 @@ async function saveWeek(){
     managersSnapshot: JSON.parse(JSON.stringify(state.managers))
   };
   try{
-    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveWeekSnapshot', snapshot, newLastNumber }) });
-    weekState.lastSavedNumber = newLastNumber;
-    weekState.history.unshift(snapshot);
-    renderAll();
+    const res = await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveWeekSnapshot', snapshot, newLastNumber }) });
+    const result = await res.json();
+    if(!result || !result.ok){
+      alert('Сервер не подтвердил сохранение недели. Скорее всего, бэкенд Apps Script ещё не обновлён (нужно добавить код и передеплоить — см. инструкцию). Ничего не сохранилось.');
+      return;
+    }
   }catch(e){
     alert('Не удалось сохранить неделю на сервере: ' + e.message);
+    return;
   }
+  await fetchData();
 }
 
 /* ===== Настройки блоков ===== */
@@ -1279,7 +1304,7 @@ function bindStaticUI(){
   document.getElementById('drawerOverlay').addEventListener('click', ()=>toggleDrawer(false));
   document.getElementById('editModeBtn').addEventListener('click', toggleEditMode);
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
-  document.getElementById('archiveExitBtn').addEventListener('click', ()=>{ viewSnapshot = null; renderAll(); });
+  document.getElementById('archiveExitBtn').addEventListener('click', ()=>{ setViewing(null); });
 
   const bind = (id, key, transform) => {
     document.getElementById(id).addEventListener('input', (e)=>{
