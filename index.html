@@ -452,17 +452,8 @@ let leadsSort = { key: 'number', dir: 1 };
 let leadsFilter = '';
 let viewSnapshot = null;   // если не null — просматриваем сохранённую неделю (не текущую)
 
-const WEEK_KEY = 'leadsDashboard_weekState_v2';
 const SETTINGS_KEY = 'leadsDashboard_settings_v5';
-
-function loadWeekState(){
-  try{
-    const raw = localStorage.getItem(WEEK_KEY);
-    return raw ? JSON.parse(raw) : { lastSavedNumber: 0, notes:{done:[],plans:[]}, history:[] };
-  }catch(e){ return { lastSavedNumber: 0, notes:{done:[],plans:[]}, history:[] }; }
-}
-function saveWeekState(){ localStorage.setItem(WEEK_KEY, JSON.stringify(weekState)); }
-let weekState = loadWeekState();
+let weekState = { lastSavedNumber: 0, notes:{done:[],plans:[]}, history:[] };
 
 const DEFAULT_BLOCKS = [
   { id:'chart',    name:'График по дням', visible:true, width:'full' },
@@ -583,6 +574,9 @@ async function fetchData(){
     if(data.error){ setStatus('error', data.error); return; }
     state.leads = data.leads || [];
     state.managers = data.managers || [];
+    weekState.lastSavedNumber = Number(data.lastSavedNumber) || 0;
+    weekState.notes = data.notes || { done:[], plans:[] };
+    weekState.history = data.history || [];
     renderAll();
     setStatus('live');
     document.getElementById('updatedAtPill').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
@@ -602,6 +596,7 @@ function setStatus(kind, msg){
 function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/')[0].trim(); }
 function currentWeekLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
 function activeWeekLeads(){ return viewSnapshot ? viewSnapshot.leads : currentWeekLeads(); }
+function activeManagers(){ return (viewSnapshot && viewSnapshot.managersSnapshot) ? viewSnapshot.managersSnapshot : state.managers; }
 function computeCounts(managerName){
   const leads = activeWeekLeads();
   const isAdRow = managerName === 'Реклама';
@@ -720,7 +715,8 @@ function renderArchiveBanner(){
 
 function renderDial(){
   const weekLeads = activeWeekLeads();
-  const totalQuota = state.managers.reduce((s,m)=>s+(Number(m.quota)||0),0);
+  const mgrs = activeManagers();
+  const totalQuota = mgrs.reduce((s,m)=>s+(Number(m.quota)||0),0);
   const totalLeads = weekLeads.length;
   document.getElementById('dialTotal').textContent = totalLeads;
   document.getElementById('dialTarget').textContent = 'из ' + totalQuota;
@@ -745,7 +741,7 @@ function renderDial(){
   document.getElementById('planFactPct').style.color = rawPct >= 100 ? 'var(--ok)' : 'var(--accent-2)';
 
   const list = document.getElementById('planFactList');
-  list.innerHTML = state.managers.map(m => {
+  list.innerHTML = mgrs.map(m => {
     const { total } = computeCounts(m.name);
     const quota = Number(m.quota)||0;
     const p = quota > 0 ? (total/quota)*100 : (total>0 ? 100 : 0);
@@ -759,16 +755,19 @@ function renderDial(){
 }
 
 function renderFutureQuotaSidebar(){
-  const totalQuota = state.managers.reduce((s,m)=>s+(Number(m.quota)||0),0);
+  const addRow = document.getElementById('addRow');
+  if(addRow) addRow.classList.toggle('visible', editMode && !viewSnapshot);
+  const mgrs = activeManagers();
+  const totalQuota = mgrs.reduce((s,m)=>s+(Number(m.quota)||0),0);
   document.getElementById('futureQuotaTotal').textContent = totalQuota;
-  const adsQuota = state.managers.filter(m=>m.name==='Реклама').reduce((s,m)=>s+(Number(m.quota)||0),0);
+  const adsQuota = mgrs.filter(m=>m.name==='Реклама').reduce((s,m)=>s+(Number(m.quota)||0),0);
   const repeatsQuota = totalQuota - adsQuota;
   document.getElementById('futureAdsCount').textContent = adsQuota;
   document.getElementById('futureRegularCount').textContent = repeatsQuota;
 
   const box = document.getElementById('managerQuotaList');
-  const dis = editMode ? '' : 'disabled';
-  box.innerHTML = state.managers.map(m => `
+  const dis = (editMode && !viewSnapshot) ? '' : 'disabled';
+  box.innerHTML = mgrs.map(m => `
     <div class="mgr-row">
       <span class="mgr-row-name ${m.name==='Реклама'?'ad':''}">${escapeHtml(m.name)}<span class="del" data-name="${escapeHtml(m.name)}" title="Удалить">✕</span></span>
       <input class="quota-input" type="number" min="0" value="${Number(m.quota)||0}" data-name="${escapeHtml(m.name)}" data-field="quota" ${dis}>
@@ -1060,15 +1059,42 @@ function renderHistory(){
   box.innerHTML = weekState.history.map((h,i) => `
     <div class="history-row" data-idx="${i}" title="Открыть эту неделю">
       <span>${new Date(h.savedAt).toLocaleDateString('ru-RU')} · №${h.fromNumber}–№${h.toNumber}</span>
-      <span><b>${h.total}</b> · <span style="color:var(--accent-3)">${h.ads} р.</span></span>
+      <span style="display:flex; align-items:center; gap:8px;">
+        <b>${h.total}</b> · <span style="color:var(--accent-3)">${h.ads} р.</span>
+        <span class="history-del" data-idx="${i}" title="Удалить эту запись (отменить сохранение)" style="color:var(--warn); cursor:pointer;">✕</span>
+      </span>
     </div>`).join('');
   box.querySelectorAll('.history-row').forEach(row => {
-    row.addEventListener('click', () => {
+    row.addEventListener('click', (e) => {
+      if(e.target.classList.contains('history-del')) return;
       viewSnapshot = weekState.history[Number(row.dataset.idx)];
       toggleDrawer(false);
       renderAll();
     });
   });
+  box.querySelectorAll('.history-del').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteHistoryEntry(Number(el.dataset.idx));
+    });
+  });
+}
+
+async function deleteHistoryEntry(idx){
+  const isLatest = idx === 0;
+  const msg = isLatest
+    ? 'Удалить последнее сохранение? Текущая неделя снова будет считаться с этой границы номеров — лиды, посчитанные в этой записи, опять станут "текущей неделей".'
+    : 'Удалить эту запись из истории? На подсчёт текущей недели это не повлияет.';
+  if(!confirm(msg)) return;
+  weekState.history.splice(idx, 1);
+  if(isLatest){
+    weekState.lastSavedNumber = weekState.history[0] ? weekState.history[0].toNumber : 0;
+  }
+  if(viewSnapshot && !weekState.history.includes(viewSnapshot)) viewSnapshot = null;
+  try{
+    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'setWeekState', lastSavedNumber: weekState.lastSavedNumber, history: weekState.history }) });
+  }catch(e){ console.error('setWeekState failed', e); }
+  renderAll();
 }
 
 /* ===== Взаимодействие ===== */
@@ -1150,22 +1176,24 @@ async function deleteManager(name){
   renderFutureQuotaSidebar(); renderDial();
 }
 
-function queueNotesSave(){ clearTimeout(saveTimers['__notes']); saveTimers['__notes'] = setTimeout(doSaveNotesLocal, 500); }
-function doSaveNotesLocal(){
+function queueNotesSave(){ clearTimeout(saveTimers['__notes']); saveTimers['__notes'] = setTimeout(doSaveNotes, 500); }
+async function doSaveNotes(){
   const done = document.getElementById('doneEdit').value.split('\n').map(s=>s.trim()).filter(Boolean);
   const plans = document.getElementById('plansEdit').value.split('\n').map(s=>s.trim()).filter(Boolean);
   weekState.notes = { done, plans };
-  saveWeekState();
   renderThesis();
+  try{
+    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveNotes', notes: weekState.notes }) });
+  }catch(e){ console.error('Notes save failed', e); }
 }
 
-function saveWeek(){
+async function saveWeek(){
   if(viewSnapshot){ alert('Сначала вернитесь к текущей неделе (кнопка вверху), чтобы сохранить её.'); return; }
   const weekLeads = currentWeekLeads();
   if(weekLeads.length === 0){
     if(!confirm('За текущую неделю пока нет новых лидов. Всё равно сохранить (просто обновит дату)?')) return;
   } else {
-    if(!confirm('Зафиксировать неделю (' + weekLeads.length + ' лидов) и начать новую? Данные графика больше меняться не будут.')) return;
+    if(!confirm('Зафиксировать неделю (' + weekLeads.length + ' лидов) и начать новую? Данные графика больше меняться не будут. Это увидят все, кто открыл эту ссылку.')) return;
   }
   const nums = weekLeads.map(l=>Number(l.number)||0).filter(n=>n>0);
   const newLastNumber = nums.length ? Math.max(...nums, weekState.lastSavedNumber) : weekState.lastSavedNumber;
@@ -1175,12 +1203,17 @@ function saveWeek(){
     toNumber: newLastNumber,
     total: weekLeads.length,
     ads: weekLeads.filter(l=>l.type==='Реклама').length,
-    leads: weekLeads
+    leads: weekLeads,
+    managersSnapshot: JSON.parse(JSON.stringify(state.managers))
   };
-  weekState.lastSavedNumber = newLastNumber;
-  weekState.history.unshift(snapshot);
-  saveWeekState();
-  renderAll();
+  try{
+    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveWeekSnapshot', snapshot, newLastNumber }) });
+    weekState.lastSavedNumber = newLastNumber;
+    weekState.history.unshift(snapshot);
+    renderAll();
+  }catch(e){
+    alert('Не удалось сохранить неделю на сервере: ' + e.message);
+  }
 }
 
 /* ===== Настройки блоков ===== */
@@ -1231,7 +1264,7 @@ function toggleEditMode(){
   document.getElementById('editModeBtn').classList.toggle('active', editMode);
   document.body.classList.toggle('edit-active', editMode);
   const addRow = document.getElementById('addRow');
-  if(addRow) addRow.classList.toggle('visible', editMode);
+  if(addRow) addRow.classList.toggle('visible', editMode && !viewSnapshot);
   renderFutureQuotaSidebar(); renderThesis();
 }
 function toggleDrawer(open){
