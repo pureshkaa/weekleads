@@ -599,12 +599,13 @@ function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/'
 function currentWeekLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
 function activeWeekLeads(){ return viewSnapshot ? viewSnapshot.leads : currentWeekLeads(); }
 function activeManagers(){ return (viewSnapshot && viewSnapshot.managersSnapshot) ? viewSnapshot.managersSnapshot : state.managers; }
-// Квота "Прошедшей недели" (левый блок) — независима от квоты "Текущей недели" (правый блок, цель на следующий период).
-// Пока для менеджера не задано своё значение слева, показываем правую квоту как стартовое значение.
+// Квота "Прошедшей недели" (левый блок) — полностью независима от квоты "Текущей недели"
+// (правый блок, план на следующий период). Никакого наследования между ними нет:
+// пока для менеджера явно не задана левая квота, она равна 0.
 function leftQuotaFor(m){
   if(viewSnapshot) return Number(m.quota)||0; // в архиве квота уже зафиксирована в снапшоте
   const v = weekState.currentQuotas ? weekState.currentQuotas[m.name] : undefined;
-  return (v !== undefined && v !== null) ? (Number(v)||0) : (Number(m.quota)||0);
+  return (v !== undefined && v !== null) ? (Number(v)||0) : 0;
 }
 function computeCounts(managerName){
   const leads = activeWeekLeads();
@@ -1127,8 +1128,8 @@ async function setViewing(savedAtOrNull){
 
 /* ===== Взаимодействие ===== */
 function attachDynamicHandlers(){
-  document.querySelectorAll('.quota-input:not(.left-quota-input)').forEach(inp => inp.addEventListener('change', () => queueSave(inp.dataset.name, 'quota', inp.value)));
-  document.querySelectorAll('.left-quota-input').forEach(inp => inp.addEventListener('change', () => queueLeftQuotaSave(inp.dataset.name, inp.value)));
+  document.querySelectorAll('.quota-input:not(.left-quota-input)').forEach(inp => inp.addEventListener('change', () => doSaveManager(inp.dataset.name, 'quota', inp.value)));
+  document.querySelectorAll('.left-quota-input').forEach(inp => inp.addEventListener('change', () => doSaveLeftQuota(inp.dataset.name, inp.value)));
   document.querySelectorAll('.mgr-row .del').forEach(el => el.addEventListener('click', () => deleteManager(el.dataset.name)));
 
   const addBtn = document.getElementById('addManagerBtn');
@@ -1179,11 +1180,11 @@ async function doSaveManager(name, field, value){
   const mgr = state.managers.find(m => m.name === name);
   if(!mgr) return;
   const updated = Object.assign({}, mgr, { [field]: field === 'quota' ? Number(value)||0 : value });
+  const idx = state.managers.findIndex(m=>m.name===name);
+  state.managers[idx] = updated;
+  renderFutureQuotaSidebar(); renderDial();
   try{
     await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveManager', manager: updated }) });
-    const idx = state.managers.findIndex(m=>m.name===name);
-    state.managers[idx] = updated;
-    renderFutureQuotaSidebar(); renderDial();
   }catch(e){ console.error('Save failed', e); }
 }
 
@@ -1207,16 +1208,20 @@ async function addManager(){
   if(!name) return;
   if(state.managers.some(m=>m.name===name)){ alert('Такое имя уже есть'); return; }
   const manager = { name, quota:Number(quotaInput.value)||0 };
-  await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveManager', manager }) });
   state.managers.push(manager);
   nameInput.value=''; quotaInput.value='0';
   renderFutureQuotaSidebar(); renderDial();
+  try{
+    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveManager', manager }) });
+  }catch(e){ console.error('Add manager failed', e); }
 }
 async function deleteManager(name){
   if(!confirm('Удалить "'+name+'" из дашборда?')) return;
-  await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'deleteManager', name }) });
   state.managers = state.managers.filter(m=>m.name!==name);
   renderFutureQuotaSidebar(); renderDial();
+  try{
+    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'deleteManager', name }) });
+  }catch(e){ console.error('Delete manager failed', e); }
 }
 
 function queueNotesSave(){ clearTimeout(saveTimers['__notes']); saveTimers['__notes'] = setTimeout(doSaveNotes, 500); }
