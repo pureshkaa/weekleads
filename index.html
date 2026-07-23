@@ -453,7 +453,7 @@ let leadsFilter = '';
 let viewSnapshot = null;   // если не null — просматриваем сохранённую неделю (не текущую)
 
 const SETTINGS_KEY = 'leadsDashboard_settings_v5';
-let weekState = { lastSavedNumber: 0, notes:{done:[],plans:[]}, history:[] };
+let weekState = { lastSavedNumber: 0, notes:{done:[],plans:[]}, history:[], currentQuotas:{} };
 
 const DEFAULT_BLOCKS = [
   { id:'chart',    name:'График по дням', visible:true, width:'full' },
@@ -577,6 +577,7 @@ async function fetchData(){
     weekState.lastSavedNumber = Number(data.lastSavedNumber) || 0;
     weekState.notes = data.notes || { done:[], plans:[] };
     weekState.history = data.history || [];
+    weekState.currentQuotas = data.currentQuotas || {};
     viewSnapshot = data.viewing ? (weekState.history.find(h => h.savedAt === data.viewing) || null) : null;
     renderAll();
     setStatus('live');
@@ -598,6 +599,13 @@ function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/'
 function currentWeekLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
 function activeWeekLeads(){ return viewSnapshot ? viewSnapshot.leads : currentWeekLeads(); }
 function activeManagers(){ return (viewSnapshot && viewSnapshot.managersSnapshot) ? viewSnapshot.managersSnapshot : state.managers; }
+// Квота "Прошедшей недели" (левый блок) — независима от квоты "Текущей недели" (правый блок, цель на следующий период).
+// Пока для менеджера не задано своё значение слева, показываем правую квоту как стартовое значение.
+function leftQuotaFor(m){
+  if(viewSnapshot) return Number(m.quota)||0; // в архиве квота уже зафиксирована в снапшоте
+  const v = weekState.currentQuotas ? weekState.currentQuotas[m.name] : undefined;
+  return (v !== undefined && v !== null) ? (Number(v)||0) : (Number(m.quota)||0);
+}
 function computeCounts(managerName){
   const leads = activeWeekLeads();
   const isAdRow = managerName === 'Реклама';
@@ -717,7 +725,7 @@ function renderArchiveBanner(){
 function renderDial(){
   const weekLeads = activeWeekLeads();
   const mgrs = activeManagers();
-  const totalQuota = mgrs.reduce((s,m)=>s+(Number(m.quota)||0),0);
+  const totalQuota = mgrs.reduce((s,m)=>s+leftQuotaFor(m),0);
   const totalLeads = weekLeads.length;
   document.getElementById('dialTotal').textContent = totalLeads;
   document.getElementById('dialTarget').textContent = 'из ' + totalQuota;
@@ -741,15 +749,19 @@ function renderDial(){
   document.getElementById('planFactPct').textContent = Math.round(rawPct) + '%';
   document.getElementById('planFactPct').style.color = rawPct >= 100 ? 'var(--ok)' : 'var(--accent-2)';
 
+  const dis = (editMode && !viewSnapshot) ? '' : 'disabled';
   const list = document.getElementById('planFactList');
   list.innerHTML = mgrs.map(m => {
     const { total } = computeCounts(m.name);
-    const quota = Number(m.quota)||0;
+    const quota = leftQuotaFor(m);
     const p = quota > 0 ? (total/quota)*100 : (total>0 ? 100 : 0);
     const fillCls = p >= 100 ? 'over' : '';
+    const quotaCell = viewSnapshot
+      ? quota
+      : `<input class="quota-input left-quota-input" type="number" min="0" value="${quota}" data-name="${escapeHtml(m.name)}" ${dis}>`;
     return `
       <div class="pf-item">
-        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums">${total} / ${quota} · ${Math.round(p)}%</span></div>
+        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums">${total} / ${quotaCell} · ${Math.round(p)}%</span></div>
         <div class="pf-item-track"><div class="pf-item-fill ${fillCls}" style="width:${Math.min(100,p)}%"></div></div>
       </div>`;
   }).join('');
@@ -1115,7 +1127,8 @@ async function setViewing(savedAtOrNull){
 
 /* ===== Взаимодействие ===== */
 function attachDynamicHandlers(){
-  document.querySelectorAll('.quota-input').forEach(inp => inp.addEventListener('change', () => queueSave(inp.dataset.name, 'quota', inp.value)));
+  document.querySelectorAll('.quota-input:not(.left-quota-input)').forEach(inp => inp.addEventListener('change', () => queueSave(inp.dataset.name, 'quota', inp.value)));
+  document.querySelectorAll('.left-quota-input').forEach(inp => inp.addEventListener('change', () => queueLeftQuotaSave(inp.dataset.name, inp.value)));
   document.querySelectorAll('.mgr-row .del').forEach(el => el.addEventListener('click', () => deleteManager(el.dataset.name)));
 
   const addBtn = document.getElementById('addManagerBtn');
@@ -1173,6 +1186,20 @@ async function doSaveManager(name, field, value){
     renderFutureQuotaSidebar(); renderDial();
   }catch(e){ console.error('Save failed', e); }
 }
+
+function queueLeftQuotaSave(name, value){
+  clearTimeout(saveTimers['left'+name]);
+  saveTimers['left'+name] = setTimeout(() => doSaveLeftQuota(name, value), 300);
+}
+async function doSaveLeftQuota(name, value){
+  const quota = Number(value) || 0;
+  weekState.currentQuotas = weekState.currentQuotas || {};
+  weekState.currentQuotas[name] = quota;
+  renderDial();
+  try{
+    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveCurrentQuota', name, quota }) });
+  }catch(e){ console.error('Save left quota failed', e); }
+}
 async function addManager(){
   const nameInput = document.getElementById('addName');
   const quotaInput = document.getElementById('addQuota');
@@ -1225,7 +1252,7 @@ async function saveWeek(){
     total: weekLeads.length,
     ads: weekLeads.filter(l=>l.type==='Реклама').length,
     leads: weekLeads,
-    managersSnapshot: JSON.parse(JSON.stringify(state.managers))
+    managersSnapshot: state.managers.map(m => ({ name: m.name, quota: leftQuotaFor(m) }))
   };
   try{
     const res = await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveWeekSnapshot', snapshot, newLastNumber }) });
@@ -1290,7 +1317,7 @@ function toggleEditMode(){
   document.body.classList.toggle('edit-active', editMode);
   const addRow = document.getElementById('addRow');
   if(addRow) addRow.classList.toggle('visible', editMode && !viewSnapshot);
-  renderFutureQuotaSidebar(); renderThesis();
+  renderFutureQuotaSidebar(); renderThesis(); renderDial();
 }
 function toggleDrawer(open){
   document.getElementById('drawer').classList.toggle('open', open);
