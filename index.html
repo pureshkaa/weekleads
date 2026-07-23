@@ -201,9 +201,30 @@
     letter-spacing:.13em; color:var(--text-dim); font-weight:700;
   }
 
-  .quota-input{width:52px; background:transparent; border:1px solid transparent; color:var(--text); font-family:var(--mono); text-align:center; border-radius:3px; padding:3px 4px; font-size:14px; font-weight:700;}
-  .quota-input:hover:not(:disabled), .quota-input:focus{border-color:var(--accent-dim); outline:none;}
-  .quota-input:disabled{color:var(--text); cursor:default; opacity:1; pointer-events:none;}
+  .quota-input{width:44px; background:transparent; border:none; color:var(--text); font-family:var(--mono); text-align:center; border-radius:3px; padding:3px 2px; font-size:14px; font-weight:700; -moz-appearance:textfield;}
+  .quota-input::-webkit-outer-spin-button, .quota-input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+  .quota-input:focus{ outline:none; }
+  .quota-input:disabled{ color:var(--text); cursor:default; opacity:1; }
+
+  .qty-stepper{
+    display:inline-flex; align-items:center; gap:2px;
+    background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:2px;
+    vertical-align:middle;
+  }
+  .qty-stepper.disabled{ opacity:.55; }
+  .qty-btn{
+    width:20px; height:20px; border-radius:6px; border:none; background:var(--panel-2);
+    color:var(--text); font-family:var(--mono); font-size:13px; font-weight:700; line-height:1;
+    cursor:pointer; display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .qty-btn:hover{ background:var(--accent); color:#0a0d1c; }
+  .qty-btn:disabled{ cursor:default; opacity:.4; background:var(--panel-2); color:var(--text); }
+
+  .pf-quota-edit{ display:flex; align-items:center; gap:8px; margin:6px 0 8px; }
+  .pf-quota-edit-label{ font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.06em; flex:none; }
+  .qty-stepper.full{ flex:1; justify-content:space-between; padding:3px 4px; }
+  .qty-stepper.full .quota-input{ flex:1; width:auto; font-size:15px; }
+  .qty-stepper.full .qty-btn{ width:24px; height:24px; font-size:15px; }
 
   .add-row{padding:12px 0 0; display:none; gap:8px; border-top:1px solid var(--line); flex-wrap:wrap; margin-top:12px;}
   .add-row.visible{display:flex;}
@@ -325,6 +346,7 @@
   <div class="status-row">
     <div class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">Подключение…</span></div>
     <div class="status-pill" id="updatedAtPill">—</div>
+    <div class="status-pill" id="backendWarnPill" style="display:none; border-color:var(--warn); color:var(--warn);" title="Бэкенд Apps Script ещё не обновлён — сохранение недели, тезисы и общий просмотр работать не будут">⚠ бэкенд устарел</div>
     <button class="icon-btn" id="refreshBtn" title="Обновить сейчас">⟳</button>
     <button class="icon-btn pencil" id="editModeBtn" title="Редактировать квоты и тезисы">✎</button>
     <button class="icon-btn" id="settingsBtn" title="Настройки">⚙</button>
@@ -443,7 +465,7 @@
 </div>
 
 <script>
-const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbze9mhoL8826pX4nXigQ7ct4foPS2VXZfoGcwNyj05_kVYYjM4eeBvE2AJAG-qGJABuEg/exec';
+const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbyTu9_0cX38JNXiYQRo1ditUCas_ob7v_UopXpRvzKYo-SBMdOlMkj8kXMmpEUwlL6AXw/exec';
 
 let state = { leads: [], managers: [] };
 let saveTimers = {};
@@ -579,6 +601,8 @@ async function fetchData(){
     weekState.history = data.history || [];
     weekState.currentQuotas = data.currentQuotas || {};
     viewSnapshot = data.viewing ? (weekState.history.find(h => h.savedAt === data.viewing) || null) : null;
+    const backendUpToDate = ('lastSavedNumber' in data) && ('currentQuotas' in data) && ('history' in data) && ('viewing' in data);
+    document.getElementById('backendWarnPill').style.display = backendUpToDate ? 'none' : 'flex';
     renderAll();
     setStatus('live');
     document.getElementById('updatedAtPill').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
@@ -597,7 +621,14 @@ function setStatus(kind, msg){
 
 function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/')[0].trim(); }
 function currentWeekLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
-function activeWeekLeads(){ return viewSnapshot ? viewSnapshot.leads : currentWeekLeads(); }
+function activeWeekLeads(){
+  if(viewSnapshot){
+    const from = Number(viewSnapshot.fromNumber)||0;
+    const to = Number(viewSnapshot.toNumber)||0;
+    return state.leads.filter(l => { const n = Number(l.number)||0; return n >= from && n <= to; });
+  }
+  return currentWeekLeads();
+}
 function activeManagers(){ return (viewSnapshot && viewSnapshot.managersSnapshot) ? viewSnapshot.managersSnapshot : state.managers; }
 // Квота "Прошедшей недели" (левый блок) — полностью независима от квоты "Текущей недели"
 // (правый блок, план на следующий период). Никакого наследования между ними нет:
@@ -750,19 +781,26 @@ function renderDial(){
   document.getElementById('planFactPct').textContent = Math.round(rawPct) + '%';
   document.getElementById('planFactPct').style.color = rawPct >= 100 ? 'var(--ok)' : 'var(--accent-2)';
 
-  const dis = (editMode && !viewSnapshot) ? '' : 'disabled';
+  const dis = (editMode && !viewSnapshot) ? true : false;
   const list = document.getElementById('planFactList');
   list.innerHTML = mgrs.map(m => {
     const { total } = computeCounts(m.name);
     const quota = leftQuotaFor(m);
     const p = quota > 0 ? (total/quota)*100 : (total>0 ? 100 : 0);
     const fillCls = p >= 100 ? 'over' : '';
-    const quotaCell = viewSnapshot
-      ? quota
-      : `<input class="quota-input left-quota-input" type="number" min="0" value="${quota}" data-name="${escapeHtml(m.name)}" ${dis}>`;
+    const editorRow = (viewSnapshot || !editMode) ? '' : `
+        <div class="pf-quota-edit">
+          <span class="pf-quota-edit-label">квота:</span>
+          <span class="qty-stepper full">
+            <button type="button" class="qty-btn qty-minus" data-name="${escapeHtml(m.name)}" data-side="left">−</button>
+            <input class="quota-input left-quota-input" type="number" min="0" value="${quota}" data-name="${escapeHtml(m.name)}">
+            <button type="button" class="qty-btn qty-plus" data-name="${escapeHtml(m.name)}" data-side="left">+</button>
+          </span>
+        </div>`;
     return `
-      <div class="pf-item">
-        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums">${total} / ${quotaCell} · ${Math.round(p)}%</span></div>
+      <div class="pf-item" data-mgr="${escapeHtml(m.name)}">
+        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums"><span class="pf-total">${total}</span> / <span class="pf-quota-num">${quota}</span> · <span class="pf-pct">${Math.round(p)}%</span></span></div>
+        ${editorRow}
         <div class="pf-item-track"><div class="pf-item-fill ${fillCls}" style="width:${Math.min(100,p)}%"></div></div>
       </div>`;
   }).join('');
@@ -780,11 +818,15 @@ function renderFutureQuotaSidebar(){
   document.getElementById('futureRegularCount').textContent = repeatsQuota;
 
   const box = document.getElementById('managerQuotaList');
-  const dis = (editMode && !viewSnapshot) ? '' : 'disabled';
+  const dis = (editMode && !viewSnapshot) ? true : false;
   box.innerHTML = mgrs.map(m => `
-    <div class="mgr-row">
+    <div class="mgr-row" data-mgr="${escapeHtml(m.name)}">
       <span class="mgr-row-name ${m.name==='Реклама'?'ad':''}">${escapeHtml(m.name)}<span class="del" data-name="${escapeHtml(m.name)}" title="Удалить">✕</span></span>
-      <input class="quota-input" type="number" min="0" value="${Number(m.quota)||0}" data-name="${escapeHtml(m.name)}" data-field="quota" ${dis}>
+      <span class="qty-stepper ${dis?'':'disabled'}">
+        <button type="button" class="qty-btn qty-minus" data-name="${escapeHtml(m.name)}" data-side="right" ${dis?'':'disabled'}>−</button>
+        <input class="quota-input" type="number" min="0" value="${Number(m.quota)||0}" data-name="${escapeHtml(m.name)}" data-field="quota" ${dis?'':'disabled'}>
+        <button type="button" class="qty-btn qty-plus" data-name="${escapeHtml(m.name)}" data-side="right" ${dis?'':'disabled'}>+</button>
+      </span>
     </div>
   `).join('');
 }
@@ -1128,8 +1170,28 @@ async function setViewing(savedAtOrNull){
 
 /* ===== Взаимодействие ===== */
 function attachDynamicHandlers(){
-  document.querySelectorAll('.quota-input:not(.left-quota-input)').forEach(inp => inp.addEventListener('change', () => doSaveManager(inp.dataset.name, 'quota', inp.value)));
-  document.querySelectorAll('.left-quota-input').forEach(inp => inp.addEventListener('change', () => doSaveLeftQuota(inp.dataset.name, inp.value)));
+  // Правая квота (менеджеры, план на следующий период)
+  document.querySelectorAll('.quota-input:not(.left-quota-input)').forEach(inp => {
+    inp.addEventListener('input', () => onRightQuotaInput(inp.dataset.name, inp.value));
+  });
+  // Левая квота (Прошедшая неделя, факт/план)
+  document.querySelectorAll('.left-quota-input').forEach(inp => {
+    inp.addEventListener('input', () => onLeftQuotaInput(inp.dataset.name, inp.value));
+  });
+  // Степперы +/-
+  document.querySelectorAll('.qty-plus, .qty-minus').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if(btn.disabled) return;
+      const wrap = btn.closest('.qty-stepper');
+      const inp = wrap.querySelector('.quota-input');
+      const delta = btn.classList.contains('qty-plus') ? 1 : -1;
+      const next = Math.max(0, (Number(inp.value)||0) + delta);
+      inp.value = next;
+      if(btn.dataset.side === 'left') onLeftQuotaInput(btn.dataset.name, next);
+      else onRightQuotaInput(btn.dataset.name, next);
+    });
+  });
+
   document.querySelectorAll('.mgr-row .del').forEach(el => el.addEventListener('click', () => deleteManager(el.dataset.name)));
 
   const addBtn = document.getElementById('addManagerBtn');
@@ -1172,31 +1234,79 @@ function attachDynamicHandlers(){
   if(plansEdit) plansEdit.addEventListener('input', queueNotesSave);
 }
 
-function queueSave(name, field, value, delay){
-  clearTimeout(saveTimers[name+field]);
-  saveTimers[name+field] = setTimeout(() => doSaveManager(name, field, value), delay || 300);
+// ---- Лёгкие частичные обновления (без пересборки списков — фокус в полях не теряется) ----
+function updateRightTotals(){
+  const mgrs = activeManagers();
+  const totalQuota = mgrs.reduce((s,m)=>s+(Number(m.quota)||0),0);
+  document.getElementById('futureQuotaTotal').textContent = totalQuota;
+  const adsQuota = mgrs.filter(m=>m.name==='Реклама').reduce((s,m)=>s+(Number(m.quota)||0),0);
+  document.getElementById('futureRegularCount').textContent = totalQuota - adsQuota;
+  document.getElementById('futureAdsCount').textContent = adsQuota;
 }
-async function doSaveManager(name, field, value){
+
+function updateLeftTotalsAndRow(name){
+  const weekLeads = activeWeekLeads();
+  const mgrs = activeManagers();
+  const totalQuota = mgrs.reduce((s,m)=>s+leftQuotaFor(m),0);
+  const totalLeads = weekLeads.length;
+  document.getElementById('dialTarget').textContent = 'из ' + totalQuota;
+
+  const circumference = 2*Math.PI*72;
+  const pct = totalQuota > 0 ? Math.min(1, totalLeads/totalQuota) : 0;
+  const circle = document.getElementById('dialProgress');
+  circle.style.strokeDasharray = circumference;
+  circle.style.strokeDashoffset = circumference * (1-pct);
+  circle.style.stroke = pct >= 1 ? 'var(--ok)' : 'url(#dialGradient)';
+
+  const rawPct = totalQuota > 0 ? (totalLeads/totalQuota)*100 : 0;
+  document.getElementById('planFactNums').textContent = totalLeads + ' / ' + totalQuota;
+  document.getElementById('planFactFill').style.width = Math.min(100, rawPct) + '%';
+  document.getElementById('planFactPct').textContent = Math.round(rawPct) + '%';
+  document.getElementById('planFactPct').style.color = rawPct >= 100 ? 'var(--ok)' : 'var(--accent-2)';
+
+  if(name){
+    const row = document.querySelector(`.pf-item[data-mgr="${CSS.escape(name)}"]`);
+    if(row){
+      const m = mgrs.find(x=>x.name===name);
+      const { total } = computeCounts(name);
+      const quota = m ? leftQuotaFor(m) : 0;
+      const p = quota > 0 ? (total/quota)*100 : (total>0 ? 100 : 0);
+      const pctEl = row.querySelector('.pf-pct');
+      const fillEl = row.querySelector('.pf-item-fill');
+      const quotaNumEl = row.querySelector('.pf-quota-num');
+      if(pctEl) pctEl.textContent = Math.round(p) + '%';
+      if(quotaNumEl) quotaNumEl.textContent = quota;
+      if(fillEl){
+        fillEl.style.width = Math.min(100,p) + '%';
+        fillEl.classList.toggle('over', p >= 100);
+      }
+    }
+  }
+}
+
+function onRightQuotaInput(name, value){
   const mgr = state.managers.find(m => m.name === name);
   if(!mgr) return;
-  const updated = Object.assign({}, mgr, { [field]: field === 'quota' ? Number(value)||0 : value });
-  const idx = state.managers.findIndex(m=>m.name===name);
-  state.managers[idx] = updated;
-  renderFutureQuotaSidebar(); renderDial();
+  mgr.quota = Number(value) || 0;
+  updateRightTotals();
+  clearTimeout(saveTimers['right'+name]);
+  saveTimers['right'+name] = setTimeout(() => doSaveManagerNetwork(mgr), 500);
+}
+async function doSaveManagerNetwork(manager){
   try{
-    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveManager', manager: updated }) });
+    await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveManager', manager }) });
   }catch(e){ console.error('Save failed', e); }
 }
 
-function queueLeftQuotaSave(name, value){
-  clearTimeout(saveTimers['left'+name]);
-  saveTimers['left'+name] = setTimeout(() => doSaveLeftQuota(name, value), 300);
-}
-async function doSaveLeftQuota(name, value){
+function onLeftQuotaInput(name, value){
   const quota = Number(value) || 0;
   weekState.currentQuotas = weekState.currentQuotas || {};
   weekState.currentQuotas[name] = quota;
-  renderDial();
+  updateLeftTotalsAndRow(name);
+  clearTimeout(saveTimers['left'+name]);
+  saveTimers['left'+name] = setTimeout(() => doSaveLeftQuotaNetwork(name, quota), 500);
+}
+async function doSaveLeftQuotaNetwork(name, quota){
   try{
     await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveCurrentQuota', name, quota }) });
   }catch(e){ console.error('Save left quota failed', e); }
@@ -1256,7 +1366,6 @@ async function saveWeek(){
     toNumber: newLastNumber,
     total: weekLeads.length,
     ads: weekLeads.filter(l=>l.type==='Реклама').length,
-    leads: weekLeads,
     managersSnapshot: state.managers.map(m => ({ name: m.name, quota: leftQuotaFor(m) }))
   };
   try{
@@ -1314,7 +1423,7 @@ let pollTimer = null;
 function schedulePoll(){
   clearInterval(pollTimer);
   const ms = Number(settings.pollInterval)||0;
-  if(ms > 0){ pollTimer = setInterval(fetchData, ms); }
+  if(ms > 0){ pollTimer = setInterval(() => { if(!editMode) fetchData(); }, ms); }
 }
 function toggleEditMode(){
   editMode = !editMode;
