@@ -201,30 +201,14 @@
     letter-spacing:.13em; color:var(--text-dim); font-weight:700;
   }
 
-  .quota-input{width:44px; background:transparent; border:none; color:var(--text); font-family:var(--mono); text-align:center; border-radius:3px; padding:3px 2px; font-size:14px; font-weight:700; -moz-appearance:textfield;}
-  .quota-input::-webkit-outer-spin-button, .quota-input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
-  .quota-input:focus{ outline:none; }
+  .quota-input{
+    width:56px; background:var(--bg); border:1.5px solid var(--accent-dim); color:var(--text);
+    font-family:var(--mono); text-align:center; border-radius:6px; padding:5px 4px;
+    font-size:15px; font-weight:700;
+  }
+  .quota-input:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(34,211,238,.2); }
   .quota-input:disabled{ color:var(--text); cursor:default; opacity:1; }
-
-  .qty-stepper{
-    display:inline-flex; align-items:center; gap:2px;
-    background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:2px;
-    vertical-align:middle;
-  }
-  .qty-stepper.disabled{ opacity:.55; }
-  .qty-btn{
-    width:20px; height:20px; border-radius:6px; border:none; background:var(--panel-2);
-    color:var(--text); font-family:var(--mono); font-size:13px; font-weight:700; line-height:1;
-    cursor:pointer; display:flex; align-items:center; justify-content:center; flex:none;
-  }
-  .qty-btn:hover{ background:var(--accent); color:#0a0d1c; }
-  .qty-btn:disabled{ cursor:default; opacity:.4; background:var(--panel-2); color:var(--text); }
-
-  .pf-quota-edit{ display:flex; align-items:center; gap:8px; margin:6px 0 8px; }
-  .pf-quota-edit-label{ font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.06em; flex:none; }
-  .qty-stepper.full{ flex:1; justify-content:space-between; padding:3px 4px; }
-  .qty-stepper.full .quota-input{ flex:1; width:auto; font-size:15px; }
-  .qty-stepper.full .qty-btn{ width:24px; height:24px; font-size:15px; }
+  .mgr-row-quota{ font-family:var(--mono); font-weight:700; font-size:15px; color:var(--text); }
 
   .add-row{padding:12px 0 0; display:none; gap:8px; border-top:1px solid var(--line); flex-wrap:wrap; margin-top:12px;}
   .add-row.visible{display:flex;}
@@ -407,7 +391,7 @@
   </div>
 </div>
 
-<div class="foot-note">Данные лидов — из той же Google Таблицы, что и раньше · Неделя фиксируется вручную кнопкой «Сохранить неделю» · Порядок блоков, тезисы и история сохранений хранятся в этом браузере</div>
+<div class="foot-note">Данные лидов — из той же Google Таблицы, что и раньше · Неделя фиксируется вручную кнопкой «Сохранить неделю» · Порядок блоков, тезисы и история сохранений хранятся в этом браузере · build 2026-07-22-23:10-ПРОВЕРЕНО</div>
 
 <div class="drawer-overlay" id="drawerOverlay"></div>
 <div class="drawer" id="drawer">
@@ -474,7 +458,7 @@ let leadsSort = { key: 'number', dir: 1 };
 let leadsFilter = '';
 let viewSnapshot = null;   // если не null — просматриваем сохранённую неделю (не текущую)
 
-const SETTINGS_KEY = 'leadsDashboard_settings_v5';
+const SETTINGS_KEY = 'leadsDashboard_settings_v6'; // версия увеличена нарочно — сбрасывает старый закэшированный apiUrl в браузере
 let weekState = { lastSavedNumber: 0, notes:{done:[],plans:[]}, history:[], currentQuotas:{} };
 
 const DEFAULT_BLOCKS = [
@@ -781,26 +765,19 @@ function renderDial(){
   document.getElementById('planFactPct').textContent = Math.round(rawPct) + '%';
   document.getElementById('planFactPct').style.color = rawPct >= 100 ? 'var(--ok)' : 'var(--accent-2)';
 
-  const dis = (editMode && !viewSnapshot) ? true : false;
+  const canEditLeft = editMode && !viewSnapshot;
   const list = document.getElementById('planFactList');
   list.innerHTML = mgrs.map(m => {
     const { total } = computeCounts(m.name);
     const quota = leftQuotaFor(m);
     const p = quota > 0 ? (total/quota)*100 : (total>0 ? 100 : 0);
     const fillCls = p >= 100 ? 'over' : '';
-    const editorRow = (viewSnapshot || !editMode) ? '' : `
-        <div class="pf-quota-edit">
-          <span class="pf-quota-edit-label">квота:</span>
-          <span class="qty-stepper full">
-            <button type="button" class="qty-btn qty-minus" data-name="${escapeHtml(m.name)}" data-side="left">−</button>
-            <input class="quota-input left-quota-input" type="number" min="0" value="${quota}" data-name="${escapeHtml(m.name)}">
-            <button type="button" class="qty-btn qty-plus" data-name="${escapeHtml(m.name)}" data-side="left">+</button>
-          </span>
-        </div>`;
+    const quotaCell = canEditLeft
+      ? `<input class="quota-input left-quota-input" type="number" min="0" value="${quota}" data-name="${escapeHtml(m.name)}">`
+      : `<span class="pf-quota-num">${quota}</span>`;
     return `
       <div class="pf-item" data-mgr="${escapeHtml(m.name)}">
-        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums"><span class="pf-total">${total}</span> / <span class="pf-quota-num">${quota}</span> · <span class="pf-pct">${Math.round(p)}%</span></span></div>
-        ${editorRow}
+        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums"><span class="pf-total">${total}</span> / ${quotaCell} · <span class="pf-pct">${Math.round(p)}%</span></span></div>
         <div class="pf-item-track"><div class="pf-item-fill ${fillCls}" style="width:${Math.min(100,p)}%"></div></div>
       </div>`;
   }).join('');
@@ -818,17 +795,18 @@ function renderFutureQuotaSidebar(){
   document.getElementById('futureRegularCount').textContent = repeatsQuota;
 
   const box = document.getElementById('managerQuotaList');
-  const dis = (editMode && !viewSnapshot) ? true : false;
-  box.innerHTML = mgrs.map(m => `
+  const canEdit = editMode && !viewSnapshot;
+  box.innerHTML = mgrs.map(m => {
+    const quotaCell = canEdit
+      ? `<input class="quota-input" type="number" min="0" value="${Number(m.quota)||0}" data-name="${escapeHtml(m.name)}" data-field="quota">`
+      : `<span class="mgr-row-quota">${Number(m.quota)||0}</span>`;
+    return `
     <div class="mgr-row" data-mgr="${escapeHtml(m.name)}">
       <span class="mgr-row-name ${m.name==='Реклама'?'ad':''}">${escapeHtml(m.name)}<span class="del" data-name="${escapeHtml(m.name)}" title="Удалить">✕</span></span>
-      <span class="qty-stepper ${dis?'':'disabled'}">
-        <button type="button" class="qty-btn qty-minus" data-name="${escapeHtml(m.name)}" data-side="right" ${dis?'':'disabled'}>−</button>
-        <input class="quota-input" type="number" min="0" value="${Number(m.quota)||0}" data-name="${escapeHtml(m.name)}" data-field="quota" ${dis?'':'disabled'}>
-        <button type="button" class="qty-btn qty-plus" data-name="${escapeHtml(m.name)}" data-side="right" ${dis?'':'disabled'}>+</button>
-      </span>
+      ${quotaCell}
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 /* ===== Графики ===== */
@@ -1169,33 +1147,22 @@ async function setViewing(savedAtOrNull){
 }
 
 /* ===== Взаимодействие ===== */
-function attachDynamicHandlers(){
-  // Правая квота (менеджеры, план на следующий период)
+function attachQuotaHandlers(){
+  // Эти элементы пересоздаются заново при каждой перерисовке списков —
+  // им нужны свежие обработчики. Остальные (кнопка добавить, фильтр, сортировка,
+  // переключатель графика, тезисы) статичны или пересоздаются только в renderAll(),
+  // поэтому подключаются отдельно и один раз, без риска задвоения.
   document.querySelectorAll('.quota-input:not(.left-quota-input)').forEach(inp => {
     inp.addEventListener('input', () => onRightQuotaInput(inp.dataset.name, inp.value));
   });
-  // Левая квота (Прошедшая неделя, факт/план)
   document.querySelectorAll('.left-quota-input').forEach(inp => {
     inp.addEventListener('input', () => onLeftQuotaInput(inp.dataset.name, inp.value));
   });
-  // Степперы +/-
-  document.querySelectorAll('.qty-plus, .qty-minus').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if(btn.disabled) return;
-      const wrap = btn.closest('.qty-stepper');
-      const inp = wrap.querySelector('.quota-input');
-      const delta = btn.classList.contains('qty-plus') ? 1 : -1;
-      const next = Math.max(0, (Number(inp.value)||0) + delta);
-      inp.value = next;
-      if(btn.dataset.side === 'left') onLeftQuotaInput(btn.dataset.name, next);
-      else onRightQuotaInput(btn.dataset.name, next);
-    });
-  });
-
   document.querySelectorAll('.mgr-row .del').forEach(el => el.addEventListener('click', () => deleteManager(el.dataset.name)));
+}
 
-  const addBtn = document.getElementById('addManagerBtn');
-  if(addBtn) addBtn.addEventListener('click', addManager);
+function attachDynamicHandlers(){
+  attachQuotaHandlers();
 
   const filterSel = document.getElementById('managerFilter');
   if(filterSel) filterSel.addEventListener('change', (e)=>{ leadsFilter = e.target.value; renderLeadsTable(); });
@@ -1265,7 +1232,7 @@ function updateLeftTotalsAndRow(name){
   document.getElementById('planFactPct').style.color = rawPct >= 100 ? 'var(--ok)' : 'var(--accent-2)';
 
   if(name){
-    const row = document.querySelector(`.pf-item[data-mgr="${CSS.escape(name)}"]`);
+    const row = Array.from(document.querySelectorAll('.pf-item')).find(el => el.dataset.mgr === name);
     if(row){
       const m = mgrs.find(x=>x.name===name);
       const { total } = computeCounts(name);
@@ -1320,7 +1287,7 @@ async function addManager(){
   const manager = { name, quota:Number(quotaInput.value)||0 };
   state.managers.push(manager);
   nameInput.value=''; quotaInput.value='0';
-  renderFutureQuotaSidebar(); renderDial();
+  renderFutureQuotaSidebar(); renderDial(); attachQuotaHandlers();
   try{
     await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveManager', manager }) });
   }catch(e){ console.error('Add manager failed', e); }
@@ -1328,7 +1295,7 @@ async function addManager(){
 async function deleteManager(name){
   if(!confirm('Удалить "'+name+'" из дашборда?')) return;
   state.managers = state.managers.filter(m=>m.name!==name);
-  renderFutureQuotaSidebar(); renderDial();
+  renderFutureQuotaSidebar(); renderDial(); attachQuotaHandlers();
   try{
     await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'deleteManager', name }) });
   }catch(e){ console.error('Delete manager failed', e); }
@@ -1432,6 +1399,7 @@ function toggleEditMode(){
   const addRow = document.getElementById('addRow');
   if(addRow) addRow.classList.toggle('visible', editMode && !viewSnapshot);
   renderFutureQuotaSidebar(); renderThesis(); renderDial();
+  attachQuotaHandlers();
 }
 function toggleDrawer(open){
   document.getElementById('drawer').classList.toggle('open', open);
@@ -1446,6 +1414,8 @@ function bindStaticUI(){
   document.getElementById('editModeBtn').addEventListener('click', toggleEditMode);
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
   document.getElementById('archiveExitBtn').addEventListener('click', ()=>{ setViewing(null); });
+  const addBtnStatic = document.getElementById('addManagerBtn');
+  if(addBtnStatic) addBtnStatic.addEventListener('click', addManager);
 
   const bind = (id, key, transform) => {
     document.getElementById(id).addEventListener('input', (e)=>{
