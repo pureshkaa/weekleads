@@ -127,6 +127,18 @@
     font-weight:800; padding:9px 18px; font-size:12.5px;
   }
 
+  .period-bar{max-width:var(--maxw); margin:0 auto 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+  .period-switch{display:flex; gap:3px; padding:4px; border:1px solid var(--accent-dim); border-radius:14px; background:var(--panel); box-shadow:0 0 18px rgba(34,211,238,.13);}
+  .period-switch button{border:0; border-radius:10px; padding:9px 20px; color:var(--text-dim); background:transparent; cursor:pointer; font-family:var(--display); font-size:11px; font-weight:700; letter-spacing:.08em;}
+  .period-switch button.active{background:linear-gradient(90deg,var(--accent),var(--accent-2)); color:#0a0d1c;}
+  .month-nav{display:none; align-items:center; gap:8px; font-family:var(--mono); font-size:12px; color:var(--text);}
+  body.month-active .month-nav{display:flex;}
+  .month-nav button{width:30px; height:30px; border:1px solid var(--line); border-radius:8px; color:var(--accent); background:var(--panel); cursor:pointer;}
+  .month-nav span{min-width:140px; text-align:center; text-transform:capitalize;}
+  .month-coverage{display:none; font-family:var(--mono); font-size:10.5px; color:var(--text-dim);}
+  body.month-active .month-coverage{display:block;}
+  body.month-active .mgr-row .del{display:none;}
+
   .layout{max-width:var(--maxw); margin:0 auto; display:grid; grid-template-columns:220px 1fr 220px; gap:24px; align-items:stretch;}
   .layout .main-col{align-self:start;}
   @media (max-width:1150px){ .layout{grid-template-columns:1fr 1fr;} .layout .main-col{grid-column:1 / -1;} }
@@ -338,6 +350,19 @@
   </div>
 </div>
 
+<div class="period-bar">
+  <div class="period-switch" role="group" aria-label="Период отчёта">
+    <button id="weekModeBtn" class="active" aria-pressed="true">НЕДЕЛЯ</button>
+    <button id="monthModeBtn" aria-pressed="false">МЕСЯЦ</button>
+  </div>
+  <div class="month-nav" id="monthNav">
+    <button id="prevMonthBtn" title="Предыдущий месяц" aria-label="Предыдущий месяц">‹</button>
+    <span id="monthLabel"></span>
+    <button id="nextMonthBtn" title="Следующий месяц" aria-label="Следующий месяц">›</button>
+  </div>
+  <span class="month-coverage" id="monthCoverage"></span>
+</div>
+
 <div class="archive-banner" id="archiveBanner">
   <span>Просмотр сохранённой недели: <b id="archiveLabel"></b></span>
   <button class="btn primary" id="archiveExitBtn">← Вернуться к текущей неделе</button>
@@ -346,7 +371,7 @@
 <div class="layout">
   <!-- Прошедшая неделя (факт) -->
   <div class="dial-card">
-    <div class="dial-label">Прошедшая неделя</div>
+    <div class="dial-label" id="factPeriodLabel">Прошедшая неделя</div>
     <div class="dial-wrap">
       <svg viewBox="0 0 170 170" width="170" height="170">
         <defs>
@@ -375,9 +400,9 @@
 
   <!-- Текущая неделя (квоты/цели) -->
   <div class="dial-card">
-    <div class="dial-label">Текущая неделя</div>
+    <div class="dial-label" id="quotaPeriodLabel">Текущая неделя</div>
     <div class="dial-num big" id="futureQuotaTotal">0</div>
-    <div class="dial-sub" style="margin-bottom:14px;">квота на неделю</div>
+    <div class="dial-sub" id="quotaPeriodSub" style="margin-bottom:14px;">квота на неделю</div>
     <div class="stat-chips">
       <div class="stat-chip repeats"><span class="stat-chip-num" id="futureRegularCount">0</span><span class="stat-chip-label">Повторы (квота)</span></div>
       <div class="stat-chip ads"><span class="stat-chip-num" id="futureAdsCount">0</span><span class="stat-chip-label">Реклама (квота)</span></div>
@@ -450,8 +475,22 @@
 
 <script>
 const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbyTu9_0cX38JNXiYQRo1ditUCas_ob7v_UopXpRvzKYo-SBMdOlMkj8kXMmpEUwlL6AXw/exec';
+const MONTHLY_CSV_URL = 'https://docs.google.com/spreadsheets/d/1tZFDTfb0AtUB5l7I5KbSSUUUaNOP6ux7M9SWYHb4BMc/export?format=csv&gid=720489481';
+const MONTHLY_QUOTA_PER_THURSDAY = {
+  'Александра':2, 'Георгий':15, 'Анна':15, 'Кристина':11,
+  'Степан':10, 'Лолита':5, 'Виталий':2, 'Реклама':13
+};
+const MONTH_BACKUP_KEY = 'leadsDashboard_monthWeekSummaries_v1';
+function loadWeekBackups(){
+  try{ return JSON.parse(localStorage.getItem(MONTH_BACKUP_KEY) || '{}'); }
+  catch(e){ return {}; }
+}
+let weekBackups = loadWeekBackups();
 
 let state = { leads: [], managers: [] };
+let monthlyState = { leads: [], seedWeeks:[], seedLoaded:false, loaded:false, error:null };
+let periodMode = 'week';
+let selectedMonth = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
 let saveTimers = {};
 let editMode = false;
 let leadsSort = { key: 'number', dir: 1 };
@@ -590,9 +629,54 @@ async function fetchData(){
     renderAll();
     setStatus('live');
     document.getElementById('updatedAtPill').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
+    if(periodMode === 'month') await fetchMonthlyData();
   }catch(err){
     setStatus('error', err.message);
   }
+}
+
+function parseCsvRows(text){
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for(let i=0; i<text.length; i++){
+    const c = text[i];
+    if(c === '"'){
+      if(quoted && text[i+1] === '"'){ cell += '"'; i++; }
+      else quoted = !quoted;
+    } else if(c === ',' && !quoted){ row.push(cell); cell = ''; }
+    else if((c === '\n' || c === '\r') && !quoted){
+      if(c === '\r' && text[i+1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += c;
+  }
+  if(cell || row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+async function fetchMonthlyData(){
+  if(!monthlyState.seedLoaded){
+    try{
+      const seedRes = await fetch('month-history-seed.json');
+      if(!seedRes.ok) throw new Error('HTTP ' + seedRes.status);
+      const seed = await seedRes.json();
+      monthlyState.seedWeeks = seed.weeks || [];
+      monthlyState.seedLoaded = true;
+    }catch(err){ monthlyState.error = 'Не удалось загрузить архив августа и сентября: ' + err.message; }
+  }
+  try{
+    const res = await fetch(MONTHLY_CSV_URL + '&_=' + Date.now());
+    if(!res.ok) throw new Error('Google Таблица: HTTP ' + res.status);
+    const rows = parseCsvRows(await res.text());
+    if(!rows.length || rows[0][1] !== 'Дата' || rows[0][2] !== 'Менеджер') throw new Error('Неожиданный формат листа «Лиды»');
+    monthlyState.leads = rows.slice(1).map((row,i) => ({
+      number:row[0] || '', date:row[1] || '', manager:row[2] || '',
+      type:row[3] || '', deal:row[4] || '', sheetRow:i+2
+    })).filter(lead => parseSheetDate(lead.date) && lead.manager && lead.type);
+    monthlyState.loaded = true;
+    if(monthlyState.seedLoaded) monthlyState.error = null;
+  }catch(err){
+    monthlyState.error = err.message;
+  }
+  if(periodMode === 'month') renderAll();
 }
 function setStatus(kind, msg){
   const dot = document.getElementById('statusDot');
@@ -605,6 +689,94 @@ function setStatus(kind, msg){
 
 function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/')[0].trim(); }
 function currentWeekLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
+function weekStartForDate(date){
+  return formatIsoDate(mostRecentThursday(date));
+}
+function formatIsoDate(date){
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,'0')}-${String(date.getUTCDate()).padStart(2,'0')}`;
+}
+function snapshotWeekStart(snapshot){
+  if(/^\d{4}-\d{2}-\d{2}$/.test(snapshot.weekStart || '')) return snapshot.weekStart;
+  const saved = new Date(snapshot.savedAt);
+  if(Number.isNaN(saved.getTime())) return '';
+  saved.setUTCDate(saved.getUTCDate() - 1);
+  return weekStartForDate(saved);
+}
+function enrichedSnapshot(snapshot){
+  const backup = weekBackups[snapshot.savedAt] || {};
+  return {
+    ...snapshot,
+    weekStart:snapshot.weekStart || backup.weekStart,
+    managerCounts:snapshot.managerCounts || backup.managerCounts
+  };
+}
+function monthWeeks(){
+  if(selectedMonth === '2026-08' || selectedMonth === '2026-09'){
+    return monthlyState.seedWeeks.filter(w => w.weekStart.startsWith(selectedMonth));
+  }
+  return weekState.history.map(enrichedSnapshot).filter(w => snapshotWeekStart(w).startsWith(selectedMonth));
+}
+function monthLeads(){
+  const weeks = monthWeeks();
+  const seeded = selectedMonth === '2026-08' || selectedMonth === '2026-09';
+  return monthlyState.leads.filter(lead => {
+    const date = parseSheetDate(lead.date);
+    if(!date) return false;
+    const start = weekStartForDate(date);
+    return weeks.some(week => {
+      if(snapshotWeekStart(week) !== start) return false;
+      if(seeded) return true;
+      const number = Number(lead.number) || 0;
+      return number > 0 && number >= Number(week.fromNumber) && number <= Number(week.toNumber);
+    });
+  });
+}
+function monthTotals(){
+  const weeks = monthWeeks();
+  const managerCounts = {};
+  let total = 0, ads = 0;
+  weeks.forEach(week => {
+    total += Number(week.total) || 0;
+    ads += Number(week.ads) || 0;
+    // Старый бэкенд может вернуть сохранённую неделю без новых полей.
+    // В этом случае восстанавливаем разбивку по людям из строк той же недели.
+    const counts = week.managerCounts && Object.keys(week.managerCounts).length
+      ? week.managerCounts : countsFromSheetWeek(week);
+    Object.entries(counts).forEach(([name,n]) => { managerCounts[name] = (managerCounts[name] || 0) + (Number(n) || 0); });
+  });
+  return { weeks, total, ads, managerCounts };
+}
+function countsFromSheetWeek(week){
+  const counts = {};
+  const start = snapshotWeekStart(week);
+  monthlyState.leads.forEach(lead => {
+    const date = parseSheetDate(lead.date);
+    if(!date || weekStartForDate(date) !== start) return;
+    const number = Number(lead.number) || 0;
+    if(!number || number < Number(week.fromNumber) || number > Number(week.toNumber)) return;
+    const name = lead.type === 'Реклама' ? 'Реклама' : firstManagerName(lead.manager);
+    if(name) counts[name] = (counts[name] || 0) + 1;
+  });
+  return counts;
+}
+function periodLeads(){ return periodMode === 'month' ? monthLeads() : activeWeekLeads(); }
+function thursdaysInMonth(key){
+  const [year, month] = key.split('-').map(Number);
+  let count = 0;
+  for(let day=1; day<=new Date(Date.UTC(year,month,0)).getUTCDate(); day++){
+    if(new Date(Date.UTC(year,month-1,day)).getUTCDay() === 4) count++;
+  }
+  return count;
+}
+function monthlyQuotaFor(name){
+  const perThursday = MONTHLY_QUOTA_PER_THURSDAY[name];
+  if(perThursday !== undefined) return perThursday * thursdaysInMonth(selectedMonth);
+  return 0;
+}
+function monthlyManagers(){
+  const names = [...new Set([...Object.keys(MONTHLY_QUOTA_PER_THURSDAY), ...Object.keys(monthTotals().managerCounts)])];
+  return names.filter(Boolean).map(name => ({ name, quota:monthlyQuotaFor(name) }));
+}
 function activeWeekLeads(){
   if(viewSnapshot){
     const from = Number(viewSnapshot.fromNumber)||0;
@@ -613,17 +785,22 @@ function activeWeekLeads(){
   }
   return currentWeekLeads();
 }
-function activeManagers(){ return (viewSnapshot && viewSnapshot.managersSnapshot) ? viewSnapshot.managersSnapshot : state.managers; }
+function activeManagers(){
+  if(periodMode === 'month') return monthlyManagers();
+  return (viewSnapshot && viewSnapshot.managersSnapshot) ? viewSnapshot.managersSnapshot : state.managers;
+}
 // Квота "Прошедшей недели" (левый блок) — полностью независима от квоты "Текущей недели"
 // (правый блок, план на следующий период). Никакого наследования между ними нет:
 // пока для менеджера явно не задана левая квота, она равна 0.
 function leftQuotaFor(m){
+  if(periodMode === 'month') return Number(m.quota)||0;
   if(viewSnapshot) return Number(m.quota)||0; // в архиве квота уже зафиксирована в снапшоте
   const v = weekState.currentQuotas ? weekState.currentQuotas[m.name] : undefined;
   return (v !== undefined && v !== null) ? (Number(v)||0) : 0;
 }
 function computeCounts(managerName){
-  const leads = activeWeekLeads();
+  if(periodMode === 'month') return { total:monthTotals().managerCounts[managerName] || 0 };
+  const leads = periodLeads();
   const isAdRow = managerName === 'Реклама';
   let total = 0;
   leads.forEach(lead => {
@@ -649,6 +826,11 @@ const PANEL_TITLES = {
   chart:'Лиды по дням',
   thesis:'Итоги недели',
   leadslist:'Лиды текущей недели'
+};
+const MONTH_PANEL_TITLES = {
+  chart:'Лиды по четвергам',
+  thesis:'Итоги недели',
+  leadslist:'Лиды сохранённых недель'
 };
 
 function panelInnerHtml(id){
@@ -705,10 +887,11 @@ function panelHeadExtra(id){
 function buildLayout(){
   const col = document.getElementById('mainCol');
   const order = settings.blocks.filter(b=>b.visible);
+  const titles = periodMode === 'month' ? MONTH_PANEL_TITLES : PANEL_TITLES;
   col.innerHTML = order.map(b => `
     <div class="panel-slot ${b.width==='half'?'w-half':'w-full'}">
       <div class="panel">
-        <div class="panel-head"><h2>${PANEL_TITLES[b.id]}</h2>${panelHeadExtra(b.id)}</div>
+        <div class="panel-head"><h2>${titles[b.id]}</h2>${panelHeadExtra(b.id)}</div>
         ${panelInnerHtml(b.id)}
       </div>
     </div>
@@ -717,6 +900,7 @@ function buildLayout(){
 
 function renderAll(){
   buildLayout();
+  renderPeriodControls();
   renderArchiveBanner();
   renderDial();
   renderFutureQuotaSidebar();
@@ -725,6 +909,32 @@ function renderAll(){
   renderLeadsTable();
   renderHistory();
   attachDynamicHandlers();
+}
+
+function monthTitle(key){
+  const [year, month] = key.split('-').map(Number);
+  return new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(Date.UTC(year,month-1,1)));
+}
+function renderPeriodControls(){
+  document.body.classList.toggle('month-active', periodMode === 'month');
+  for(const [id,mode] of [['weekModeBtn','week'],['monthModeBtn','month']]){
+    const button = document.getElementById(id);
+    button.classList.toggle('active',periodMode === mode);
+    button.setAttribute('aria-pressed',String(periodMode === mode));
+  }
+  document.getElementById('monthLabel').textContent = monthTitle(selectedMonth);
+  const {weeks,total} = monthTotals();
+  const historical = selectedMonth === '2026-08' || selectedMonth === '2026-09';
+  const coverage = `${weeks.length} из ${thursdaysInMonth(selectedMonth)} недель ${historical ? 'в архиве' : 'сохранено'} · ${total} лидов`;
+  document.getElementById('monthCoverage').textContent = monthlyState.error ? `${coverage} · ${monthlyState.error}` : coverage;
+  document.getElementById('factPeriodLabel').textContent = periodMode === 'month' ? 'Факт за месяц' : 'Прошедшая неделя';
+  const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+  document.getElementById('quotaPeriodLabel').textContent = periodMode === 'month'
+    ? (selectedMonth === currentMonth ? 'Текущий месяц' : 'План за месяц') : 'Текущая неделя';
+  const n = thursdaysInMonth(selectedMonth);
+  document.getElementById('quotaPeriodSub').textContent = periodMode === 'month'
+    ? `квота на ${monthTitle(selectedMonth)} · ${n} ${n === 5 ? 'четвергов' : 'четверга'}`
+    : 'квота на неделю';
 }
 
 function renderArchiveBanner(){
@@ -739,10 +949,10 @@ function renderArchiveBanner(){
 }
 
 function renderDial(){
-  const weekLeads = activeWeekLeads();
+  const weekLeads = periodLeads();
   const mgrs = activeManagers();
   const totalQuota = mgrs.reduce((s,m)=>s+leftQuotaFor(m),0);
-  const totalLeads = weekLeads.length;
+  const totalLeads = periodMode === 'month' ? monthTotals().total : weekLeads.length;
   document.getElementById('dialTotal').textContent = totalLeads;
   document.getElementById('dialTarget').textContent = 'из ' + totalQuota;
 
@@ -754,7 +964,7 @@ function renderDial(){
   circle.style.strokeDashoffset = offset;
   circle.style.stroke = pct >= 1 ? 'var(--ok)' : 'url(#dialGradient)';
 
-  const adsCount = weekLeads.filter(l => l.type === 'Реклама').length;
+  const adsCount = periodMode === 'month' ? monthTotals().ads : weekLeads.filter(l => l.type === 'Реклама').length;
   const regularCount = totalLeads - adsCount;
   document.getElementById('repeatsCount').textContent = regularCount;
   document.getElementById('adsCount').textContent = adsCount;
@@ -765,19 +975,19 @@ function renderDial(){
   document.getElementById('planFactPct').textContent = Math.round(rawPct) + '%';
   document.getElementById('planFactPct').style.color = rawPct >= 100 ? 'var(--ok)' : 'var(--accent-2)';
 
-  const canEditLeft = editMode && !viewSnapshot;
+  const canEditLeft = editMode && periodMode === 'week' && !viewSnapshot;
   const list = document.getElementById('planFactList');
   list.innerHTML = mgrs.map(m => {
     const { total } = computeCounts(m.name);
     const quota = leftQuotaFor(m);
-    const p = quota > 0 ? (total/quota)*100 : (total>0 ? 100 : 0);
+    const p = quota > 0 ? (total/quota)*100 : (periodMode === 'month' ? 0 : (total>0 ? 100 : 0));
     const fillCls = p >= 100 ? 'over' : '';
     const quotaCell = canEditLeft
       ? `<input class="quota-input left-quota-input" type="number" min="0" value="${quota}" data-name="${escapeHtml(m.name)}">`
       : `<span class="pf-quota-num">${quota}</span>`;
     return `
       <div class="pf-item" data-mgr="${escapeHtml(m.name)}">
-        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums"><span class="pf-total">${total}</span> / ${quotaCell} · <span class="pf-pct">${Math.round(p)}%</span></span></div>
+        <div class="pf-item-row"><span class="pf-item-name">${escapeHtml(m.name)}</span><span class="pf-item-nums"><span class="pf-total">${total}</span> / ${quotaCell} · <span class="pf-pct">${quota ? Math.round(p)+'%' : (periodMode === 'month' ? '—' : Math.round(p)+'%')}</span></span></div>
         <div class="pf-item-track"><div class="pf-item-fill ${fillCls}" style="width:${Math.min(100,p)}%"></div></div>
       </div>`;
   }).join('');
@@ -785,7 +995,7 @@ function renderDial(){
 
 function renderFutureQuotaSidebar(){
   const addRow = document.getElementById('addRow');
-  if(addRow) addRow.classList.toggle('visible', editMode && !viewSnapshot);
+  if(addRow) addRow.classList.toggle('visible', editMode && periodMode === 'week' && !viewSnapshot);
   const mgrs = activeManagers();
   const totalQuota = mgrs.reduce((s,m)=>s+(Number(m.quota)||0),0);
   document.getElementById('futureQuotaTotal').textContent = totalQuota;
@@ -795,7 +1005,7 @@ function renderFutureQuotaSidebar(){
   document.getElementById('futureRegularCount').textContent = repeatsQuota;
 
   const box = document.getElementById('managerQuotaList');
-  const canEdit = editMode && !viewSnapshot;
+  const canEdit = editMode && periodMode === 'week' && !viewSnapshot;
   box.innerHTML = mgrs.map(m => {
     const quotaCell = canEdit
       ? `<input class="quota-input" type="number" min="0" value="${Number(m.quota)||0}" data-name="${escapeHtml(m.name)}" data-field="quota">`
@@ -870,23 +1080,40 @@ function groupByManager(leads){
   });
   return Object.keys(byMgr).map(name => ({ name, total: byMgr[name] })).sort((a,b)=>b.total-a.total);
 }
+function monthWeekPoints(){
+  return monthWeeks().slice()
+    .sort((a,b)=>snapshotWeekStart(a).localeCompare(snapshotWeekStart(b)))
+    .map(week => {
+      const date = new Date(snapshotWeekStart(week) + 'T00:00:00Z');
+      return {label:formatDateLabel(date),date,weekday:'ЧТ',total:Number(week.total)||0,ads:Number(week.ads)||0};
+    });
+}
+function monthManagerData(){
+  return Object.entries(monthTotals().managerCounts)
+    .filter(([,total]) => total > 0)
+    .map(([name,total]) => ({name,total}))
+    .sort((a,b)=>b.total-a.total);
+}
 
 function renderChart(){
   const wrap = document.getElementById('chartWrap');
   if(!wrap) return;
-  const weekLeads = activeWeekLeads();
+  const weekLeads = periodLeads();
+  const total = periodMode === 'month' ? monthTotals().total : weekLeads.length;
 
-  if(weekLeads.length === 0){
-    wrap.innerHTML = '<div class="chart-empty">Нет лидов для отображения</div>';
+  if(periodMode === 'month' ? monthWeeks().length === 0 : total === 0){
+    wrap.innerHTML = `<div class="chart-empty">${periodMode === 'month' ? 'Нет сохранённых недель для отображения' : 'Нет лидов для отображения'}</div>`;
     return;
   }
-  if(settings.chartMode === 'bar') renderChartBar(wrap, weekLeads);
-  else if(settings.chartMode === 'donut') renderChartDonut(wrap, weekLeads);
-  else renderChartLine(wrap, weekLeads);
+  const days = periodMode === 'month' ? monthWeekPoints() : null;
+  const managers = periodMode === 'month' ? monthManagerData() : null;
+  if(settings.chartMode === 'bar') renderChartBar(wrap, weekLeads, days);
+  else if(settings.chartMode === 'donut') renderChartDonut(wrap, weekLeads, managers);
+  else renderChartLine(wrap, weekLeads, days);
 }
 
-function renderChartLine(wrap, weekLeads){
-  const days = groupByDate(weekLeads);
+function renderChartLine(wrap, weekLeads, groupedDays){
+  const days = groupedDays || groupByDate(weekLeads);
   const avg = days.reduce((s,d)=>s+d.total,0) / days.length;
   const maxVal = Math.max(...days.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
@@ -955,8 +1182,8 @@ function renderChartLine(wrap, weekLeads){
   `;
 }
 
-function renderChartBar(wrap, weekLeads){
-  const days = groupByDate(weekLeads);
+function renderChartBar(wrap, weekLeads, groupedDays){
+  const days = groupedDays || groupByDate(weekLeads);
   const avg = days.reduce((s,d)=>s+d.total,0) / days.length;
   const maxVal = Math.max(...days.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
@@ -998,8 +1225,8 @@ function renderChartBar(wrap, weekLeads){
   `;
 }
 
-function renderChartDonut(wrap, weekLeads){
-  const data = groupByManager(weekLeads);
+function renderChartDonut(wrap, weekLeads, groupedManagers){
+  const data = groupedManagers || groupByManager(weekLeads);
   const total = data.reduce((s,d)=>s+d.total,0) || 1;
   const colors = ['var(--accent)','var(--accent-2)','var(--accent-3)','var(--ok)','var(--warn)','#f59e0b','#60a5fa'];
   const R = 90, r = 54, cx = 130, cy = 130;
@@ -1053,13 +1280,13 @@ function renderLeadsTable(){
   const tbody = document.getElementById('leadsTableBody');
   if(!tbody) return;
   const filterSelect = document.getElementById('managerFilter');
-  const names = [...new Set(state.managers.map(m => m.name))];
+  const names = [...new Set(activeManagers().map(m => m.name))];
   const prevValue = filterSelect.value;
   filterSelect.innerHTML = '<option value="">Все менеджеры</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
   filterSelect.value = names.includes(prevValue) ? prevValue : '';
   leadsFilter = filterSelect.value;
 
-  let rows = [...activeWeekLeads()];
+  let rows = [...periodLeads()];
   if(leadsFilter){
     if(leadsFilter === 'Реклама'){ rows = rows.filter(l => l.type === 'Реклама'); }
     else{ rows = rows.filter(l => l.type !== 'Реклама' && firstManagerName(l.manager) === leadsFilter); }
@@ -1067,16 +1294,19 @@ function renderLeadsTable(){
   const { key, dir } = leadsSort;
   rows.sort((a,b) => {
     let va = a[key], vb = b[key];
-    if(key === 'number'){ va = Number(va)||0; vb = Number(vb)||0; return (va-vb)*dir; }
+    if(key === 'number'){
+      if(periodMode === 'month') return ((Number(a.sheetRow)||0)-(Number(b.sheetRow)||0))*dir;
+      va = Number(va)||0; vb = Number(vb)||0; return (va-vb)*dir;
+    }
     if(key === 'date'){ va = parseSheetDate(a.date)||new Date(0); vb = parseSheetDate(b.date)||new Date(0); return (va-vb)*dir; }
     va = String(va||'').toLowerCase(); vb = String(vb||'').toLowerCase();
     return va.localeCompare(vb, 'ru') * dir;
   });
   const countEl = document.getElementById('leadsCount');
   if(countEl) countEl.textContent = rows.length;
-  tbody.innerHTML = rows.map(l => `
+  tbody.innerHTML = rows.map((l,i) => `
     <tr>
-      <td>${escapeHtml(l.number)}</td><td>${escapeHtml(l.date)}</td><td>${escapeHtml(l.manager)}</td>
+      <td>${periodMode === 'month' ? i+1 : escapeHtml(l.number)}</td><td>${escapeHtml(l.date)}</td><td>${escapeHtml(l.manager)}</td>
       <td><span class="badge ${String(l.type||'').toLowerCase()}">${escapeHtml(l.type)}</span></td>
       <td><a href="${escapeHtml(l.deal)}" target="_blank" rel="noopener">${escapeHtml(l.deal)}</a></td>
     </tr>`).join('');
@@ -1327,13 +1557,25 @@ async function saveWeek(){
   }
   const nums = weekLeads.map(l=>Number(l.number)||0).filter(n=>n>0);
   const newLastNumber = nums.length ? Math.max(...nums, weekState.lastSavedNumber) : weekState.lastSavedNumber;
+  const leadDates = weekLeads.map(l=>parseSheetDate(l.date)).filter(Boolean);
+  const referenceDate = leadDates.length
+    ? new Date(Math.min(...leadDates.map(d=>d.getTime())))
+    : new Date(Date.now() - 86400000);
+  const managerCounts = {};
+  weekLeads.forEach(lead => {
+    const isAd = lead.type === 'Реклама';
+    const name = isAd ? 'Реклама' : firstManagerName(lead.manager);
+    if(name) managerCounts[name] = (managerCounts[name] || 0) + 1;
+  });
   const snapshot = {
     savedAt: new Date().toISOString(),
+    weekStart: weekStartForDate(referenceDate),
     fromNumber: weekState.lastSavedNumber + 1,
     toNumber: newLastNumber,
     total: weekLeads.length,
     ads: weekLeads.filter(l=>l.type==='Реклама').length,
-    managersSnapshot: state.managers.map(m => ({ name: m.name, quota: leftQuotaFor(m) }))
+    managerCounts,
+    managersSnapshot: state.managers.map(m => ({ name: m.name, quota: Number(weekState.currentQuotas[m.name]) || 0 }))
   };
   try{
     const res = await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'saveWeekSnapshot', snapshot, newLastNumber }) });
@@ -1346,6 +1588,8 @@ async function saveWeek(){
     alert('Не удалось сохранить неделю на сервере: ' + e.message);
     return;
   }
+  weekBackups[snapshot.savedAt] = {weekStart:snapshot.weekStart,managerCounts};
+  try{ localStorage.setItem(MONTH_BACKUP_KEY, JSON.stringify(weekBackups)); }catch(e){ console.warn('Не удалось сохранить локальную копию итогов недели', e); }
   await fetchData();
 }
 
@@ -1408,6 +1652,22 @@ function toggleDrawer(open){
 }
 function bindStaticUI(){
   document.getElementById('refreshBtn').addEventListener('click', fetchData);
+  document.getElementById('weekModeBtn').addEventListener('click', ()=>{
+    if(periodMode === 'week') return;
+    periodMode = 'week'; renderAll();
+  });
+  document.getElementById('monthModeBtn').addEventListener('click', ()=>{
+    if(periodMode === 'month') return;
+    periodMode = 'month'; renderAll(); fetchMonthlyData();
+  });
+  const moveMonth = delta => {
+    const [year,month] = selectedMonth.split('-').map(Number);
+    const date = new Date(Date.UTC(year,month-1+delta,1));
+    selectedMonth = `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,'0')}`;
+    renderAll();
+  };
+  document.getElementById('prevMonthBtn').addEventListener('click', ()=>moveMonth(-1));
+  document.getElementById('nextMonthBtn').addEventListener('click', ()=>moveMonth(1));
   document.getElementById('settingsBtn').addEventListener('click', ()=>toggleDrawer(true));
   document.getElementById('drawerClose').addEventListener('click', ()=>toggleDrawer(false));
   document.getElementById('drawerOverlay').addEventListener('click', ()=>toggleDrawer(false));
