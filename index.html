@@ -1233,8 +1233,9 @@ function renderChartLine(wrap, weekLeads, groupedDays){
   const maxVal = Math.max(...known.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
 
-  const stepX = 110, padX = 46, padTop = 30, padBottom = 50, chartH = 220;
-  const svgW = Math.max(520, days.length * stepX + padX*2);
+  const stepX = groupedDays ? 75 : 110, padX = groupedDays ? 32 : 46;
+  const padTop = 30, padBottom = 50, chartH = 220;
+  const svgW = Math.max(520, (days.length - (groupedDays ? 1 : 0)) * stepX + padX*2);
   const svgH = padTop + chartH + padBottom;
   const xFor = i => padX + i*stepX;
   const yFor = v => padTop + chartH - (v/niceMax)*chartH;
@@ -1311,8 +1312,9 @@ function renderChartBar(wrap, weekLeads, groupedDays){
   const maxVal = Math.max(...known.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
 
-  const barW = 52, stepX = 110, padX = 46, padTop = 30, padBottom = 50, chartH = 220;
-  const svgW = Math.max(520, days.length * stepX + padX*2);
+  const barW = groupedDays ? 40 : 52, stepX = groupedDays ? 75 : 110, padX = groupedDays ? 32 : 46;
+  const padTop = 30, padBottom = 50, chartH = 220;
+  const svgW = Math.max(520, (days.length - (groupedDays ? 1 : 0)) * stepX + padX*2);
   const svgH = padTop + chartH + padBottom;
   const xFor = i => padX + i*stepX;
   const hFor = v => (v/niceMax)*chartH;
