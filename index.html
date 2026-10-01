@@ -134,8 +134,16 @@
   .month-nav{display:none; align-items:center; gap:8px; font-family:var(--mono); font-size:12px; color:var(--text);}
   body.month-active .month-nav{display:flex;}
   .month-nav button{width:30px; height:30px; border:1px solid var(--line); border-radius:8px; color:var(--accent); background:var(--panel); cursor:pointer;}
-  .month-nav span{min-width:140px; text-align:center; text-transform:capitalize;}
-  body.month-active .mgr-row .del{display:none;}
+  .month-nav span{min-width:44px; text-align:center; text-transform:uppercase;}
+  .week-nav{display:none; align-items:center; gap:6px; font-family:var(--mono); font-size:12px; color:var(--text);}
+  body:not(.month-active) .week-nav{display:flex;}
+  .week-nav button{width:27px; height:27px; border:1px solid var(--line); border-radius:8px; color:var(--accent); background:var(--panel); cursor:pointer;}
+  .week-nav button:disabled{opacity:.35; cursor:default;}
+  .week-nav span{min-width:45px; text-align:center;}
+  body.month-active.edit-active .mgr-row .del,
+  body.archive-active.edit-active .mgr-row .del{display:none;}
+  body.archive-active.edit-active .thesis-view{display:block;}
+  body.archive-active.edit-active .thesis-edit{display:none;}
   .month-week-editor{display:none; margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--panel-2);}
   .month-week-editor.open{display:block;}
   .month-week-editor-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:10px;}
@@ -144,8 +152,6 @@
   .month-week-card details label{margin-top:6px;}
   .month-week-editor label{display:flex; flex-direction:column; gap:4px; color:var(--text-dim); font-family:var(--mono); font-size:11px;}
   .month-week-editor input{width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:8px; color:var(--text); background:var(--panel); font:inherit;}
-  .month-edit-btn{display:none;}
-  body.month-active .month-edit-btn{display:inline-flex;}
 
   .layout{max-width:var(--maxw); margin:0 auto; display:grid; grid-template-columns:220px 1fr 220px; gap:24px; align-items:stretch;}
   .layout .main-col{align-self:start;}
@@ -351,7 +357,7 @@
     <div class="status-pill" id="updatedAtPill">—</div>
     <div class="status-pill" id="backendWarnPill" style="display:none; border-color:var(--warn); color:var(--warn);" title="Бэкенд Apps Script ещё не обновлён — сохранение недели, тезисы и общий просмотр работать не будут">⚠ бэкенд устарел</div>
     <button class="icon-btn" id="refreshBtn" title="Обновить сейчас">⟳</button>
-    <button class="icon-btn pencil" id="editModeBtn" title="Редактировать квоты и тезисы">✎</button>
+    <button class="icon-btn pencil" id="editModeBtn" title="Редактировать квоты, недели и тезисы">✎</button>
     <button class="icon-btn" id="settingsBtn" title="Настройки">⚙</button>
     <button class="btn save-week" id="saveWeekBtn" title="Зафиксировать текущую неделю и начать новую">Сохранить неделю</button>
   </div>
@@ -366,6 +372,11 @@
     <button id="prevMonthBtn" title="Предыдущий месяц" aria-label="Предыдущий месяц">‹</button>
     <span id="monthLabel"></span>
     <button id="nextMonthBtn" title="Следующий месяц" aria-label="Следующий месяц">›</button>
+  </div>
+  <div class="week-nav" id="weekNav">
+    <button id="prevWeekBtn" title="Предыдущая неделя" aria-label="Предыдущая неделя">‹</button>
+    <span id="weekLabel"></span>
+    <button id="nextWeekBtn" title="Следующая неделя" aria-label="Следующая неделя">›</button>
   </div>
 </div>
 
@@ -499,7 +510,6 @@ let monthConfig = loadLocalJson(MONTH_CONFIG_KEY, {manualWeeks:{},quotaOverrides
 let monthConfigDirty = false;
 let notesRevision = 0;
 let notesWriteChain = Promise.resolve();
-let monthEditorOpen = false;
 const MONTH_BACKUP_KEY = 'leadsDashboard_monthWeekSummaries_v1';
 function loadWeekBackups(){
   try{ return JSON.parse(localStorage.getItem(MONTH_BACKUP_KEY) || '{}'); }
@@ -520,6 +530,7 @@ let editMode = false;
 let leadsSort = { key: 'number', dir: 1 };
 let leadsFilter = '';
 let viewSnapshot = null;   // если не null — просматриваем сохранённую неделю (не текущую)
+let selectedWeekKey = null; // null — текущая неделя; иначе дата отчётного четверга
 
 const SETTINGS_KEY = 'leadsDashboard_settings_v6'; // версия увеличена нарочно — сбрасывает старый закэшированный apiUrl в браузере
 let weekState = { lastSavedNumber: 0, notes:{done:[],plans:[]}, history:[], currentQuotas:{} };
@@ -642,11 +653,11 @@ function applyDashboardData(data,fromCache=false){
   weekState.notes = data.notes || { done:[], plans:[] };
   weekState.history = data.history || [];
   weekState.currentQuotas = data.currentQuotas || {};
-  viewSnapshot = data.viewing ? (weekState.history.find(h => h.savedAt === data.viewing) || null) : null;
   if(weekState.notes.monthConfig && !monthConfigDirty && (!fromCache || !localStorage.getItem(MONTH_CONFIG_KEY))){
     monthConfig = weekState.notes.monthConfig;
     try{ localStorage.setItem(MONTH_CONFIG_KEY, JSON.stringify(monthConfig)); }catch(e){}
   }
+  syncWeekSelection();
   const backendUpToDate = ('lastSavedNumber' in data) && ('currentQuotas' in data) && ('history' in data) && ('viewing' in data);
   document.getElementById('backendWarnPill').style.display = backendUpToDate ? 'none' : 'flex';
   renderAll();
@@ -714,7 +725,14 @@ function setStatus(kind, msg){
 }
 
 function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/')[0].trim(); }
-function currentWeekLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
+function unsavedLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
+function currentWeekLeads(){
+  const reportThursday = currentReportThursday();
+  return unsavedLeads().filter(lead=>{
+    const date = parseSheetDate(lead.date);
+    return date && formatIsoDate(nextThursday(date))===reportThursday;
+  });
+}
 function weekStartForDate(date){
   return formatIsoDate(mostRecentThursday(date));
 }
@@ -778,6 +796,53 @@ function weekForThursday(dateKey){
     return {reportThursday:dateKey,total:MANUAL_WEEK_DEFAULTS[dateKey],manual:true};
   }
   return base;
+}
+function currentReportThursday(){
+  const savedDates = weekState.history.map(enrichedSnapshot).map(reportThursdayForSnapshot).filter(Boolean).sort();
+  if(savedDates.length){
+    const next = new Date(savedDates[savedDates.length-1]+'T00:00:00Z');
+    next.setUTCDate(next.getUTCDate()+7);
+    return formatIsoDate(next);
+  }
+  const initialReport = '2026-10-01';
+  const now = new Date();
+  const localDate = new Date(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()));
+  if(formatIsoDate(localDate)>=initialReport) return initialReport;
+  const dates = unsavedLeads().map(lead=>parseSheetDate(lead.date)).filter(Boolean);
+  if(dates.length){
+    const first = new Date(Math.min(...dates.map(date=>date.getTime())));
+    return formatIsoDate(nextThursday(first));
+  }
+  return formatIsoDate(localDate.getUTCDay()===4 ? localDate : nextThursday(localDate));
+}
+function manualWeekSnapshot(key){
+  const total = Object.prototype.hasOwnProperty.call(monthConfig.manualWeeks || {},key)
+    ? Number(monthConfig.manualWeeks[key])||0 : MANUAL_WEEK_DEFAULTS[key];
+  const facts = (monthConfig.managerFacts || {})[key] || {};
+  const complete = Object.keys(MONTHLY_QUOTA_PER_THURSDAY).every(name=>facts[name]!==undefined);
+  const weekStart = new Date(key+'T00:00:00Z');
+  weekStart.setUTCDate(weekStart.getUTCDate()-7);
+  return {manual:true,reportThursday:key,weekStart:formatIsoDate(weekStart),total,
+    ads:complete ? Number(facts['Реклама'])||0 : null,
+    managerCounts:complete ? facts : null,
+    managersSnapshot:Object.entries(MONTHLY_QUOTA_PER_THURSDAY).map(([name,quota])=>({name,quota}))};
+}
+function weekNavigationEntries(){
+  const entries = new Map();
+  const currentKey = currentReportThursday();
+  for(const key of Object.keys({...MANUAL_WEEK_DEFAULTS,...(monthConfig.manualWeeks || {})})){
+    if(key !== currentKey) entries.set(key,{key,snapshot:manualWeekSnapshot(key)});
+  }
+  for(const snapshot of weekState.history.map(enrichedSnapshot)){
+    const key = reportThursdayForSnapshot(snapshot);
+    if(key) entries.set(key,{key,snapshot});
+  }
+  entries.set(currentKey,{key:currentKey,snapshot:null});
+  return [...entries.values()].sort((a,b)=>a.key.localeCompare(b.key));
+}
+function syncWeekSelection(){
+  viewSnapshot = selectedWeekKey ? (weekNavigationEntries().find(entry=>entry.key===selectedWeekKey)?.snapshot || null) : null;
+  if(selectedWeekKey && !viewSnapshot) selectedWeekKey = null;
 }
 function monthWeeks(){
   return thursdaysForMonth(selectedMonth).map(weekForThursday).filter(Boolean);
@@ -863,6 +928,12 @@ function monthlyManagers(){
 }
 function activeWeekLeads(){
   if(viewSnapshot){
+    if(viewSnapshot.manual){
+      return monthlyState.leads.filter(lead=>{
+        const date = parseSheetDate(lead.date);
+        return date && formatIsoDate(nextThursday(date))===viewSnapshot.reportThursday;
+      });
+    }
     const from = Number(viewSnapshot.fromNumber)||0;
     const to = Number(viewSnapshot.toNumber)||0;
     return state.leads.filter(l => { const n = Number(l.number)||0; return n >= from && n <= to; });
@@ -872,6 +943,9 @@ function activeWeekLeads(){
 function activeManagers(){
   if(periodMode === 'month') return monthlyManagers();
   return (viewSnapshot && viewSnapshot.managersSnapshot) ? viewSnapshot.managersSnapshot : state.managers;
+}
+function futureManagers(){
+  return periodMode === 'month' ? monthlyManagers() : state.managers;
 }
 // Квота "Прошедшей недели" (левый блок) — полностью независима от квоты "Текущей недели"
 // (правый блок, план на следующий период). Никакого наследования между ними нет:
@@ -886,6 +960,10 @@ function computeCounts(managerName){
   if(periodMode === 'month'){
     const totals = monthTotals();
     return { total:totals.breakdownComplete ? (totals.managerCounts[managerName] || 0) : null };
+  }
+  if(viewSnapshot){
+    const counts = viewSnapshot.managerCounts || (viewSnapshot.manual ? null : countsFromSheetWeek(viewSnapshot));
+    return {total:counts ? (Number(counts[managerName])||0) : null};
   }
   const leads = periodLeads();
   const isAdRow = managerName === 'Реклама';
@@ -915,7 +993,7 @@ const PANEL_TITLES = {
   leadslist:'Лиды текущей недели'
 };
 const MONTH_PANEL_TITLES = {
-  chart:'Лиды по четвергам',
+  chart:'Лиды по неделям',
   thesis:'Итоги недели',
   leadslist:'Список лидов'
 };
@@ -956,7 +1034,6 @@ function panelInnerHtml(id){
 }
 function panelHeadExtra(id){
   if(id==='chart') return `
-    <button class="btn month-edit-btn" id="monthEditBtn" type="button">✎ Недели</button>
     <div class="segmented" id="chartModeSwitch">
       <button data-mode="line">Линия</button>
       <button data-mode="bar">Столбцы</button>
@@ -979,7 +1056,7 @@ function buildLayout(){
   col.innerHTML = order.map(b => `
     <div class="panel-slot ${b.width==='half'?'w-half':'w-full'}">
       <div class="panel">
-        <div class="panel-head"><h2>${titles[b.id]}</h2>${panelHeadExtra(b.id)}</div>
+        <div class="panel-head"><h2>${periodMode==='week' && viewSnapshot && b.id==='leadslist' ? 'Лиды недели' : titles[b.id]}</h2>${panelHeadExtra(b.id)}</div>
         ${panelInnerHtml(b.id)}
       </div>
     </div>
@@ -987,6 +1064,7 @@ function buildLayout(){
 }
 
 function renderAll(){
+  syncWeekSelection();
   buildLayout();
   renderPeriodControls();
   renderArchiveBanner();
@@ -1001,30 +1079,44 @@ function renderAll(){
 }
 
 function monthTitle(key){
-  const [year, month] = key.split('-').map(Number);
-  return new Intl.DateTimeFormat('ru-RU',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(Date.UTC(year,month-1,1)));
+  const month = Number(key.split('-')[1]);
+  return ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'][month-1] || '';
 }
 function renderPeriodControls(){
   document.body.classList.toggle('month-active', periodMode === 'month');
+  document.body.classList.toggle('archive-active', periodMode === 'week' && !!viewSnapshot);
   for(const [id,mode] of [['weekModeBtn','week'],['monthModeBtn','month']]){
     const button = document.getElementById(id);
     button.classList.toggle('active',periodMode === mode);
     button.setAttribute('aria-pressed',String(periodMode === mode));
   }
   document.getElementById('monthLabel').textContent = monthTitle(selectedMonth);
-  document.getElementById('factPeriodLabel').textContent = periodMode === 'month' ? 'Факт за месяц' : 'Прошедшая неделя';
+  renderWeekNavigation();
+  document.getElementById('factPeriodLabel').textContent = periodMode === 'month' ? 'Факт за месяц' : viewSnapshot ? 'Факт недели' : 'Прошедшая неделя';
   const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
   document.getElementById('quotaPeriodLabel').textContent = periodMode === 'month'
     ? (selectedMonth === currentMonth || (currentMonth === '2026-09' && selectedMonth === '2026-10') ? 'Текущий месяц' : 'План за месяц') : 'Текущая неделя';
   document.getElementById('quotaPeriodSub').textContent = '';
 }
+function renderWeekNavigation(){
+  const entries = weekNavigationEntries();
+  const selectedIndex = viewSnapshot
+    ? entries.findIndex(entry=>entry.key===selectedWeekKey && entry.snapshot)
+    : entries.findIndex(entry=>!entry.snapshot);
+  const index = selectedIndex >= 0 ? selectedIndex : entries.length-1;
+  const current = entries[index];
+  const label = document.getElementById('weekLabel');
+  label.textContent = current.key.slice(8,10)+'.'+current.key.slice(5,7);
+  label.title = current.snapshot ? 'Сохранённая неделя · '+current.key : 'Текущая неделя · '+current.key;
+  document.getElementById('prevWeekBtn').disabled = index<=0;
+  document.getElementById('nextWeekBtn').disabled = index>=entries.length-1;
+}
 
 function renderArchiveBanner(){
   const banner = document.getElementById('archiveBanner');
-  if(viewSnapshot){
+  if(viewSnapshot && periodMode === 'week'){
     banner.classList.add('show');
-    document.getElementById('archiveLabel').textContent =
-      new Date(viewSnapshot.savedAt).toLocaleDateString('ru-RU') + ' · №' + viewSnapshot.fromNumber + '–№' + viewSnapshot.toNumber;
+    document.getElementById('archiveLabel').textContent = formatDateLabel(new Date(viewSnapshot.reportThursday+'T00:00:00Z'));
   } else {
     banner.classList.remove('show');
   }
@@ -1034,7 +1126,7 @@ function renderDial(){
   const weekLeads = periodLeads();
   const mgrs = activeManagers();
   const totalQuota = mgrs.reduce((s,m)=>s+leftQuotaFor(m),0);
-  const totalLeads = periodMode === 'month' ? monthTotals().total : weekLeads.length;
+  const totalLeads = periodMode === 'month' ? monthTotals().total : viewSnapshot ? Number(viewSnapshot.total)||0 : weekLeads.length;
   document.getElementById('dialTotal').textContent = totalLeads;
   document.getElementById('dialTarget').textContent = 'из ' + totalQuota;
 
@@ -1047,9 +1139,10 @@ function renderDial(){
   circle.style.stroke = pct >= 1 ? 'var(--ok)' : 'url(#dialGradient)';
 
   const monthDetails = periodMode === 'month' ? monthTotals() : null;
-  const adsCount = monthDetails ? monthDetails.ads : weekLeads.filter(l => l.type === 'Реклама').length;
-  document.getElementById('repeatsCount').textContent = monthDetails && !monthDetails.breakdownComplete ? '—' : totalLeads - adsCount;
-  document.getElementById('adsCount').textContent = monthDetails && !monthDetails.breakdownComplete ? '—' : adsCount;
+  const adsCount = monthDetails ? monthDetails.ads : viewSnapshot ? viewSnapshot.ads : weekLeads.filter(l => l.type === 'Реклама').length;
+  const adsKnown = monthDetails ? monthDetails.breakdownComplete : adsCount !== null && adsCount !== undefined;
+  document.getElementById('repeatsCount').textContent = adsKnown ? totalLeads - adsCount : '—';
+  document.getElementById('adsCount').textContent = adsKnown ? adsCount : '—';
 
   const rawPct = totalQuota > 0 ? (totalLeads/totalQuota)*100 : 0;
   document.getElementById('planFactNums').textContent = totalLeads + ' / ' + totalQuota;
@@ -1078,7 +1171,7 @@ function renderDial(){
 function renderFutureQuotaSidebar(){
   const addRow = document.getElementById('addRow');
   if(addRow) addRow.classList.toggle('visible', editMode && periodMode === 'week' && !viewSnapshot);
-  const mgrs = activeManagers();
+  const mgrs = futureManagers();
   const totalQuota = mgrs.reduce((s,m)=>s+(Number(m.quota)||0),0);
   document.getElementById('futureQuotaTotal').textContent = totalQuota;
   const adsQuota = mgrs.filter(m=>m.name==='Реклама').reduce((s,m)=>s+(Number(m.quota)||0),0);
@@ -1087,7 +1180,7 @@ function renderFutureQuotaSidebar(){
   document.getElementById('futureRegularCount').textContent = repeatsQuota;
 
   const box = document.getElementById('managerQuotaList');
-  const canEdit = editMode && (periodMode === 'month' || !viewSnapshot);
+  const canEdit = editMode;
   box.innerHTML = mgrs.map(m => {
     const quotaCell = canEdit
       ? `<input class="quota-input" type="number" min="0" value="${Number(m.quota)||0}" data-name="${escapeHtml(m.name)}" data-field="quota">`
@@ -1162,22 +1255,25 @@ function groupByManager(leads){
   });
   return Object.keys(byMgr).map(name => ({ name, total: byMgr[name] })).sort((a,b)=>b.total-a.total);
 }
-function monthWeekPoints(){
-  const anchor = new Date('2026-08-06T00:00:00Z');
-  const draft = draftWeek();
-  const now = new Date();
-  const nextReport = draft ? new Date(draft.reportThursday + 'T00:00:00Z') : nextThursday(new Date(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())));
-  const lastKnown = weekState.history.map(enrichedSnapshot).map(w=>new Date(reportThursdayForSnapshot(w)+'T00:00:00Z'))
-    .filter(d=>!Number.isNaN(d.getTime()));
-  const cursor = new Date(Math.max(nextReport.getTime(),...lastKnown.map(d=>d.getTime()),anchor.getTime()));
-  const weekIndex = Math.max(0,Math.round((cursor-anchor)/604800000));
-  const block = Math.max(0,Math.floor(weekIndex/4)-2);
+function monthChartWindowStart(today=new Date()){
+  const anchor = new Date('2026-07-09T00:00:00Z');
+  const localDate = new Date(Date.UTC(today.getFullYear(),today.getMonth(),today.getDate()));
+  const latestThursday = mostRecentThursday(localDate);
+  const weekIndex = Math.max(0,Math.round((latestThursday-anchor)/604800000));
+  const block = Math.max(0,Math.floor((weekIndex-8)/4));
   const start = new Date(anchor);
   start.setUTCDate(start.getUTCDate()+block*28);
+  return start;
+}
+function monthWeekPoints(){
+  const today = new Date();
+  const start = monthChartWindowStart(today);
+  const localDate = new Date(Date.UTC(today.getFullYear(),today.getMonth(),today.getDate()));
+  const latestThursday = mostRecentThursday(localDate);
   return Array.from({length:12},(_,i)=>{
     const date = new Date(start);
     date.setUTCDate(date.getUTCDate()+7*i);
-    const week = weekForThursday(formatIsoDate(date));
+    const week = date <= latestThursday ? weekForThursday(formatIsoDate(date)) : null;
     return {label:formatDateLabel(date),date,weekday:'ЧТ',total:week ? Number(week.total)||0 : null,
       ads:week ? Number(week.ads)||0 : null};
   });
@@ -1195,10 +1291,14 @@ function renderChart(){
   const wrap = document.getElementById('chartWrap');
   if(!wrap) return;
   const weekLeads = periodLeads();
-  const total = periodMode === 'month' ? monthTotals().total : weekLeads.length;
+  const total = periodMode === 'month' ? monthTotals().total : viewSnapshot ? Number(viewSnapshot.total)||0 : weekLeads.length;
 
   if(periodMode === 'week' && total === 0){
-    wrap.innerHTML = `<div class="chart-empty">${periodMode === 'month' ? 'Нет сохранённых недель для отображения' : 'Нет лидов для отображения'}</div>`;
+    wrap.innerHTML = '<div class="chart-empty">Нет лидов для отображения</div>';
+    return;
+  }
+  if(periodMode === 'week' && viewSnapshot?.manual && !weekLeads.length){
+    wrap.innerHTML = '<div class="chart-empty">По этой неделе сохранён только общий итог</div>';
     return;
   }
   const days = periodMode === 'month' ? monthWeekPoints() : null;
@@ -1210,9 +1310,9 @@ function renderChart(){
 function renderMonthWeekEditor(){
   const box = document.getElementById('monthWeekEditor');
   if(!box) return;
-  box.classList.toggle('open',periodMode === 'month' && monthEditorOpen);
-  if(!monthEditorOpen || periodMode !== 'month') return;
-  box.innerHTML = `<div style="font-weight:700;">Итоги по четвергам — ${escapeHtml(monthTitle(selectedMonth))}</div>
+  box.classList.toggle('open',periodMode === 'month' && editMode);
+  if(!editMode || periodMode !== 'month') return;
+  box.innerHTML = `<div style="font-weight:700;">Итоги по неделям — ${escapeHtml(monthTitle(selectedMonth))}</div>
     <div class="month-week-editor-grid">${thursdaysForMonth(selectedMonth).map(key=>{
       const week = weekForThursday(key);
       const facts = (monthConfig.managerFacts || {})[key] || {};
@@ -1248,20 +1348,25 @@ function renderChartLine(wrap, weekLeads, groupedDays){
       <text x="${padX-22}" y="${y+3}" text-anchor="end" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${val}</text>`;
   }
 
-  let linePath = '', areaPath = '';
+  let linePath = '', areaPath = '', segmentOpen = false, lastKnownX = 0;
+  const lastKnownIndex = days.reduce((last,d,i)=>d.total !== null ? i : last,-1);
   days.forEach((d,i) => {
-    if(d.total === null) return;
+    if(d.total === null){
+      if(segmentOpen) areaPath += `L ${lastKnownX} ${padTop+chartH} Z `;
+      segmentOpen = false;
+      return;
+    }
     const x = xFor(i), y = yFor(d.total);
-    if(i===0){ linePath += `M ${x} ${y} `; areaPath += `M ${x} ${padTop+chartH} L ${x} ${y} `; }
+    if(!segmentOpen){ linePath += `M ${x} ${y} `; areaPath += `M ${x} ${padTop+chartH} L ${x} ${y} `; segmentOpen = true; }
     else{
       const px = xFor(i-1), py = yFor(days[i-1].total);
       const cx = (px+x)/2;
       linePath += `C ${cx} ${py}, ${cx} ${y}, ${x} ${y} `;
       areaPath += `C ${cx} ${py}, ${cx} ${y}, ${x} ${y} `;
     }
+    lastKnownX = x;
   });
-  const lastX = xFor(Math.max(0,known.length-1));
-  areaPath += `L ${lastX} ${padTop+chartH} Z`;
+  if(segmentOpen) areaPath += `L ${lastKnownX} ${padTop+chartH} Z`;
 
   let points = '';
   days.forEach((d,i) => {
@@ -1274,7 +1379,7 @@ function renderChartLine(wrap, weekLeads, groupedDays){
     const x = xFor(i), y = yFor(d.total);
     const above = d.total >= avg;
     const color = above ? 'var(--ok)' : 'var(--warn)';
-    const isLast = i === known.length-1;
+    const isLast = i === lastKnownIndex;
     points += `
       <g>
         ${isLast ? `<circle cx="${x}" cy="${y}" r="12" fill="${color}" opacity="0.25"><animate attributeName="r" values="10;16;10" dur="2s" repeatCount="indefinite"/></circle>` : ''}
@@ -1437,7 +1542,7 @@ function renderLeadsTable(){
   const countEl = document.getElementById('leadsCount');
   if(countEl) countEl.textContent = rows.length;
   const countWrap = document.getElementById('leadsCountWrap');
-  if(countWrap) countWrap.style.display = periodMode === 'month' && (selectedMonth === '2026-08' || selectedMonth === '2026-09') ? 'none' : '';
+  if(countWrap) countWrap.style.display = (periodMode === 'month' && (selectedMonth === '2026-08' || selectedMonth === '2026-09')) || (periodMode === 'week' && viewSnapshot?.manual) ? 'none' : '';
   tbody.innerHTML = rows.map((l,i) => `
     <tr>
       <td>${periodMode === 'month' ? i+1 : escapeHtml(l.number)}</td><td>${escapeHtml(l.date)}</td><td>${escapeHtml(l.manager)}</td>
@@ -1498,16 +1603,21 @@ async function deleteHistoryEntry(idx){
   await fetchData();
 }
 
-async function setViewing(savedAtOrNull){
-  try{
-    const res = await fetch(apiUrl(), { method:'POST', body: JSON.stringify({ action:'setViewing', viewing: savedAtOrNull }) });
-    const result = await res.json();
-    if(!result || !result.ok){ alert('Сервер не подтвердил переключение недели. Проверьте, что бэкенд Apps Script обновлён и передеплоен.'); return; }
-  }catch(e){
-    alert('Не удалось связаться с сервером: ' + e.message);
-    return;
+function selectWeek(keyOrNull){
+  selectedWeekKey = keyOrNull;
+  syncWeekSelection();
+  if(editMode){
+    editMode = false;
+    document.getElementById('editModeBtn').classList.remove('active');
+    document.body.classList.remove('edit-active');
   }
-  await fetchData();
+  periodMode = 'week';
+  renderAll();
+  if(viewSnapshot?.manual && !monthlyState.loaded && !monthlyState.loading) fetchMonthlyData();
+}
+function setViewing(savedAtOrNull){
+  const snapshot = savedAtOrNull ? weekState.history.find(h=>h.savedAt===savedAtOrNull) : null;
+  selectWeek(snapshot ? reportThursdayForSnapshot(enrichedSnapshot(snapshot)) : null);
 }
 
 /* ===== Взаимодействие ===== */
@@ -1527,13 +1637,6 @@ function attachQuotaHandlers(){
 
 function attachDynamicHandlers(){
   attachQuotaHandlers();
-  const monthEditBtn = document.getElementById('monthEditBtn');
-  if(monthEditBtn) monthEditBtn.addEventListener('click',()=>{
-    monthEditorOpen = !monthEditorOpen;
-    monthEditBtn.classList.toggle('active',monthEditorOpen);
-    renderMonthWeekEditor();
-    bindMonthWeekInputs();
-  });
   bindMonthWeekInputs();
 
   const filterSel = document.getElementById('managerFilter');
@@ -1574,6 +1677,7 @@ function attachDynamicHandlers(){
 }
 function bindMonthWeekInputs(){
   document.querySelectorAll('.month-week-input').forEach(inp=>inp.addEventListener('change',()=>{
+    if(warnIfWeekNeedsSaving()) return;
     const key = inp.dataset.date;
     monthConfig.manualWeeks = monthConfig.manualWeeks || {};
     if(inp.value === '') delete monthConfig.manualWeeks[key];
@@ -1582,6 +1686,7 @@ function bindMonthWeekInputs(){
     renderDial(); renderChart(); renderLeadsTable();
   }));
   document.querySelectorAll('.month-person-input').forEach(inp=>inp.addEventListener('change',()=>{
+    if(warnIfWeekNeedsSaving()) return;
     const key = inp.dataset.date, name = inp.dataset.name;
     monthConfig.managerFacts = monthConfig.managerFacts || {};
     monthConfig.managerFacts[key] = monthConfig.managerFacts[key] || {};
@@ -1593,7 +1698,7 @@ function bindMonthWeekInputs(){
 
 // ---- Лёгкие частичные обновления (без пересборки списков — фокус в полях не теряется) ----
 function updateRightTotals(){
-  const mgrs = activeManagers();
+  const mgrs = futureManagers();
   const totalQuota = mgrs.reduce((s,m)=>s+(Number(m.quota)||0),0);
   document.getElementById('futureQuotaTotal').textContent = totalQuota;
   const adsQuota = mgrs.filter(m=>m.name==='Реклама').reduce((s,m)=>s+(Number(m.quota)||0),0);
@@ -1668,6 +1773,7 @@ function onLeftQuotaInput(name, value){
   saveTimers['left'+name] = setTimeout(() => doSaveLeftQuotaNetwork(name, quota), 500);
 }
 function setMonthlyQuota(name,value){
+  if(warnIfWeekNeedsSaving()) return;
   monthConfig.quotaOverrides = monthConfig.quotaOverrides || {};
   monthConfig.quotaOverrides[selectedMonth] = monthConfig.quotaOverrides[selectedMonth] || {};
   monthConfig.quotaOverrides[selectedMonth][name] = Math.max(0,Math.round(Number(value)||0));
@@ -1702,6 +1808,7 @@ async function doSaveLeftQuotaNetwork(name, quota){
   }catch(e){ console.error('Save left quota failed', e); }
 }
 async function addManager(){
+  if(warnIfWeekNeedsSaving()) return;
   const nameInput = document.getElementById('addName');
   const quotaInput = document.getElementById('addQuota');
   const name = nameInput.value.trim();
@@ -1716,6 +1823,7 @@ async function addManager(){
   }catch(e){ console.error('Add manager failed', e); }
 }
 async function deleteManager(name){
+  if(warnIfWeekNeedsSaving()) return;
   if(!confirm('Удалить "'+name+'" из дашборда?')) return;
   state.managers = state.managers.filter(m=>m.name!==name);
   renderFutureQuotaSidebar(); renderDial(); attachQuotaHandlers();
@@ -1726,6 +1834,7 @@ async function deleteManager(name){
 
 function queueNotesSave(){ clearTimeout(saveTimers['__notes']); saveTimers['__notes'] = setTimeout(doSaveNotes, 500); }
 async function doSaveNotes(){
+  if(warnIfWeekNeedsSaving()) return;
   const done = document.getElementById('doneEdit').value.split('\n').map(s=>s.trim()).filter(Boolean);
   const plans = document.getElementById('plansEdit').value.split('\n').map(s=>s.trim()).filter(Boolean);
   weekState.notes = {...weekState.notes,done,plans,monthConfig};
@@ -1734,19 +1843,24 @@ async function doSaveNotes(){
 }
 
 async function saveWeek(){
-  if(viewSnapshot){ alert('Сначала вернитесь к текущей неделе (кнопка вверху), чтобы сохранить её.'); return; }
+  if(periodMode === 'week' && viewSnapshot){ alert('Сначала вернитесь к текущей неделе (кнопка вверху), чтобы сохранить её.'); return; }
+  const reportThursday = currentReportThursday();
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  if(today < reportThursday){
+    alert('Эта неделя заканчивается '+reportThursday.slice(8,10)+'.'+reportThursday.slice(5,7)+'. Сохраните её в четверг.');
+    return;
+  }
   const weekLeads = currentWeekLeads();
   if(weekLeads.length === 0){
-    if(!confirm('За текущую неделю пока нет новых лидов. Всё равно сохранить (просто обновит дату)?')) return;
+    if(!confirm('За эту неделю нет новых лидов. Всё равно сохранить её с нулевым фактом?')) return;
   } else {
     if(!confirm('Зафиксировать неделю (' + weekLeads.length + ' лидов) и начать новую? Данные графика больше меняться не будут. Это увидят все, кто открыл эту ссылку.')) return;
   }
   const nums = weekLeads.map(l=>Number(l.number)||0).filter(n=>n>0);
   const newLastNumber = nums.length ? Math.max(...nums, weekState.lastSavedNumber) : weekState.lastSavedNumber;
-  const leadDates = weekLeads.map(l=>parseSheetDate(l.date)).filter(Boolean);
-  const referenceDate = leadDates.length
-    ? new Date(Math.min(...leadDates.map(d=>d.getTime())))
-    : new Date(Date.now() - 86400000);
+  const weekStart = new Date(reportThursday+'T00:00:00Z');
+  weekStart.setUTCDate(weekStart.getUTCDate()-7);
   const managerCounts = {};
   weekLeads.forEach(lead => {
     const isAd = lead.type === 'Реклама';
@@ -1755,8 +1869,8 @@ async function saveWeek(){
   });
   const snapshot = {
     savedAt: new Date().toISOString(),
-    weekStart: weekStartForDate(referenceDate),
-    reportThursday: formatIsoDate(nextThursday(referenceDate)),
+    weekStart: formatIsoDate(weekStart),
+    reportThursday,
     fromNumber: weekState.lastSavedNumber + 1,
     toNumber: newLastNumber,
     total: weekLeads.length,
@@ -1818,20 +1932,35 @@ function renderBlockList(){
 
 /* ===== UI общие ===== */
 let pollTimer = null;
+let chartRolloverTimer = null;
+function scheduleChartRollover(){
+  clearTimeout(chartRolloverTimer);
+  const now = new Date();
+  const nextDay = new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);
+  chartRolloverTimer = setTimeout(()=>{
+    if(periodMode === 'month') renderChart();
+    renderWeekNavigation();
+    scheduleChartRollover();
+  },Math.max(1000,nextDay.getTime()-now.getTime()+1000));
+}
 function warnIfWeekNeedsSaving(){
-  if(periodMode !== 'week' || viewSnapshot) return false;
-  const draft = draftWeek();
-  if(!draft) return false;
+  const reportThursday = currentReportThursday();
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-  if(draft.reportThursday > today) return false;
-  alert('Сначала сохраните прошлую неделю кнопкой «Сохранить неделю», затем редактируйте новую.');
+  if(reportThursday > today) return false;
+  alert('Не забудьте сохранить неделю '+reportThursday.slice(8,10)+'.'+reportThursday.slice(5,7)+'. Сначала нажмите «Сохранить неделю», затем редактируйте показатели.');
+  if(editMode){
+    editMode = false;
+    document.getElementById('editModeBtn').classList.remove('active');
+    document.body.classList.remove('edit-active');
+    renderAll();
+  }
   return true;
 }
 function schedulePoll(){
   clearInterval(pollTimer);
   const ms = Number(settings.pollInterval)||0;
-  if(ms > 0){ pollTimer = setInterval(() => { if(!editMode && !monthEditorOpen) fetchData(); }, ms); }
+  if(ms > 0){ pollTimer = setInterval(() => { if(!editMode) fetchData(); }, ms); }
 }
 function toggleEditMode(){
   if(!editMode && warnIfWeekNeedsSaving()) return;
@@ -1840,8 +1969,9 @@ function toggleEditMode(){
   document.body.classList.toggle('edit-active', editMode);
   const addRow = document.getElementById('addRow');
   if(addRow) addRow.classList.toggle('visible', editMode && !viewSnapshot);
-  renderFutureQuotaSidebar(); renderThesis(); renderDial();
+  renderFutureQuotaSidebar(); renderThesis(); renderDial(); renderMonthWeekEditor();
   attachQuotaHandlers();
+  bindMonthWeekInputs();
 }
 function toggleDrawer(open){
   document.getElementById('drawer').classList.toggle('open', open);
@@ -1866,6 +1996,16 @@ function bindStaticUI(){
   };
   document.getElementById('prevMonthBtn').addEventListener('click', ()=>moveMonth(-1));
   document.getElementById('nextMonthBtn').addEventListener('click', ()=>moveMonth(1));
+  const moveWeek = delta => {
+    const entries = weekNavigationEntries();
+    const currentIndex = viewSnapshot
+      ? entries.findIndex(entry=>entry.key===selectedWeekKey && entry.snapshot)
+      : entries.findIndex(entry=>!entry.snapshot);
+    const next = entries[currentIndex+delta];
+    if(next) selectWeek(next.snapshot ? next.key : null);
+  };
+  document.getElementById('prevWeekBtn').addEventListener('click',()=>moveWeek(-1));
+  document.getElementById('nextWeekBtn').addEventListener('click',()=>moveWeek(1));
   document.getElementById('settingsBtn').addEventListener('click', ()=>toggleDrawer(true));
   document.getElementById('drawerClose').addEventListener('click', ()=>toggleDrawer(false));
   document.getElementById('drawerOverlay').addEventListener('click', ()=>toggleDrawer(false));
@@ -1915,6 +2055,7 @@ document.getElementById('updatedAtPill').textContent = 'загружено из 
 fetchData();
 if(periodMode === 'month') fetchMonthlyData();
 schedulePoll();
+scheduleChartRollover();
 </script>
 </body>
 </html>
