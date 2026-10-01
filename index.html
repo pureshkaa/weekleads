@@ -65,17 +65,6 @@
   }
 
 
-  /* ===== Archive banner ===== */
-  .archive-banner{
-    max-width:var(--maxw); margin:0 auto 18px; display:none;
-    align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
-    padding:10px 18px; border-radius:20px; border:1px solid var(--accent-2);
-    background:color-mix(in srgb, var(--accent-2) 16%, transparent);
-    font-family:var(--mono); font-size:12px; color:var(--text);
-  }
-  .archive-banner.show{display:flex;}
-  .archive-banner b{color:var(--accent-2);}
-
   .topbar{
     display:flex; align-items:flex-end; justify-content:space-between;
     gap:var(--gap); max-width:var(--maxw); margin:0 auto 20px; flex-wrap:wrap;
@@ -140,6 +129,7 @@
   .week-nav button{width:27px; height:27px; border:1px solid var(--line); border-radius:8px; color:var(--accent); background:var(--panel); cursor:pointer;}
   .week-nav button:disabled{opacity:.35; cursor:default;}
   .week-nav span{min-width:45px; text-align:center;}
+  body.archive-active .week-nav span{padding:7px 11px; border:1px solid var(--accent-2); border-radius:9px; background:color-mix(in srgb, var(--accent-2) 24%, var(--panel)); color:var(--text); font-weight:800; box-shadow:0 0 15px color-mix(in srgb, var(--accent-2) 35%, transparent);}
   body.month-active.edit-active .mgr-row .del,
   body.archive-active.edit-active .mgr-row .del{display:none;}
   body.archive-active.edit-active .thesis-view{display:block;}
@@ -380,11 +370,6 @@
   </div>
 </div>
 
-<div class="archive-banner" id="archiveBanner">
-  <span>Просмотр сохранённой недели: <b id="archiveLabel"></b></span>
-  <button class="btn primary" id="archiveExitBtn">← Вернуться к текущей неделе</button>
-</div>
-
 <div class="layout">
   <!-- Прошедшая неделя (факт) -->
   <div class="dial-card">
@@ -529,6 +514,7 @@ let saveTimers = {};
 let editMode = false;
 let leadsSort = { key: 'number', dir: 1 };
 let leadsFilter = '';
+let leadsListOpen = false;
 let viewSnapshot = null;   // если не null — просматриваем сохранённую неделю (не текущую)
 let selectedWeekKey = null; // null — текущая неделя; иначе дата отчётного четверга
 
@@ -848,24 +834,13 @@ function monthWeeks(){
   return thursdaysForMonth(selectedMonth).map(weekForThursday).filter(Boolean);
 }
 function monthLeads(){
-  const weeks = monthWeeks();
-  const selected = [];
-  const currentRows = state.leads || [];
-  const tableRows = monthlyState.loaded ? monthlyState.leads : [];
-  weeks.forEach(week=>{
-    const rows = week.manual ? tableRows : currentRows;
-    rows.forEach(lead=>{
+  const firstDate = monthChartWindowStart();
+  firstDate.setUTCDate(firstDate.getUTCDate()-7);
+  const rows = monthlyState.loaded ? monthlyState.leads : state.leads;
+  return rows.filter(lead=>{
     const date = parseSheetDate(lead.date);
-    if(!date) return;
-    const reportDate = formatIsoDate(nextThursday(date));
-      if(reportThursdayForSnapshot(week) !== reportDate) return;
-      if(week.manual){ selected.push(lead); return; }
-      const number = Number(lead.number) || 0;
-      if(week.draft && number > weekState.lastSavedNumber){ selected.push(lead); return; }
-      if(!week.draft && number > 0 && number >= Number(week.fromNumber) && number <= Number(week.toNumber)) selected.push(lead);
-    });
+    return date && date >= firstDate;
   });
-  return selected;
 }
 function monthTotals(){
   const weeks = monthWeeks();
@@ -1021,7 +996,7 @@ function panelInnerHtml(id){
     </div>
   `;
   if(id==='leadslist') return `
-    <div class="leads-body" id="leadsBody">
+    <div class="leads-body ${leadsListOpen ? 'open' : ''}" id="leadsBody">
       <table class="leads-table">
         <thead><tr>
           <th data-sort="number">№ ⇅</th><th data-sort="date">Дата ⇅</th><th data-sort="manager">Менеджер ⇅</th><th data-sort="type">Тип ⇅</th><th>Сделка</th>
@@ -1045,7 +1020,7 @@ function panelHeadExtra(id){
       <select class="btn" id="managerFilter" style="padding:7px 10px;"><option value="">Все менеджеры</option></select>
       <span id="leadsCountWrap" style="font-size:11px; color:var(--text-dim); font-family:'JetBrains Mono',monospace;">(<span id="leadsCount">0</span>)</span>
     </div>
-    <button class="btn" id="toggleLeadsBtn">Показать</button>
+    <button class="btn" id="toggleLeadsBtn">${leadsListOpen ? 'Скрыть' : 'Показать'}</button>
   `;
   return '';
 }
@@ -1067,7 +1042,6 @@ function renderAll(){
   syncWeekSelection();
   buildLayout();
   renderPeriodControls();
-  renderArchiveBanner();
   renderDial();
   renderFutureQuotaSidebar();
   renderChart();
@@ -1107,19 +1081,9 @@ function renderWeekNavigation(){
   const current = entries[index];
   const label = document.getElementById('weekLabel');
   label.textContent = current.key.slice(8,10)+'.'+current.key.slice(5,7);
-  label.title = current.snapshot ? 'Сохранённая неделя · '+current.key : 'Текущая неделя · '+current.key;
+  label.title = current.snapshot ? 'Прошлая неделя · '+current.key : 'Текущая неделя · '+current.key;
   document.getElementById('prevWeekBtn').disabled = index<=0;
   document.getElementById('nextWeekBtn').disabled = index>=entries.length-1;
-}
-
-function renderArchiveBanner(){
-  const banner = document.getElementById('archiveBanner');
-  if(viewSnapshot && periodMode === 'week'){
-    banner.classList.add('show');
-    document.getElementById('archiveLabel').textContent = formatDateLabel(new Date(viewSnapshot.reportThursday+'T00:00:00Z'));
-  } else {
-    banner.classList.remove('show');
-  }
 }
 
 function renderDial(){
@@ -1326,6 +1290,13 @@ function renderMonthWeekEditor(){
     }).join('')}</div>`;
 }
 
+function chartPointColor(days,index,monthly,average){
+  if(!monthly) return days[index].total >= average ? 'var(--ok)' : 'var(--warn)';
+  const previous = days.slice(0,index).reverse().find(day=>day.total !== null);
+  if(!previous) return 'var(--accent)';
+  return days[index].total > previous.total ? 'var(--ok)' : 'var(--warn)';
+}
+
 function renderChartLine(wrap, weekLeads, groupedDays){
   const days = groupedDays || groupByDate(weekLeads);
   const known = days.filter(d=>d.total !== null);
@@ -1372,21 +1343,21 @@ function renderChartLine(wrap, weekLeads, groupedDays){
   days.forEach((d,i) => {
     if(d.total === null){
       const x = xFor(i);
-      points += `<text x="${x}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">ЧТ</text>
-        <text x="${x}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>`;
+      points += `<text x="${x}" y="${padTop+chartH+31}" text-anchor="middle" font-family="var(--display)" font-weight="800" font-size="13" fill="var(--accent)">${escapeHtml(shortDate(d.label))}</text>`;
       return;
     }
     const x = xFor(i), y = yFor(d.total);
-    const above = d.total >= avg;
-    const color = above ? 'var(--ok)' : 'var(--warn)';
+    const color = chartPointColor(days,i,!!groupedDays,avg);
     const isLast = i === lastKnownIndex;
     points += `
       <g>
         ${isLast ? `<circle cx="${x}" cy="${y}" r="12" fill="${color}" opacity="0.25"><animate attributeName="r" values="10;16;10" dur="2s" repeatCount="indefinite"/></circle>` : ''}
         <circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="var(--panel)" stroke-width="2" style="filter:drop-shadow(0 0 6px ${color})"/>
         <text x="${x}" y="${y-18}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="14" fill="var(--text)">${d.total}</text>
-        <text x="${x}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">${d.weekday}</text>
-        <text x="${x}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>
+        ${groupedDays
+          ? `<text x="${x}" y="${padTop+chartH+31}" text-anchor="middle" font-family="var(--display)" font-weight="800" font-size="13" fill="var(--accent)">${escapeHtml(shortDate(d.label))}</text>`
+          : `<text x="${x}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">${d.weekday}</text>
+             <text x="${x}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>`}
       </g>`;
   });
 
@@ -1436,19 +1407,19 @@ function renderChartBar(wrap, weekLeads, groupedDays){
   days.forEach((d,i) => {
     if(d.total === null){
       const x = xFor(i);
-      bars += `<text x="${x}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">ЧТ</text>
-        <text x="${x}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>`;
+      bars += `<text x="${x}" y="${padTop+chartH+31}" text-anchor="middle" font-family="var(--display)" font-weight="800" font-size="13" fill="var(--accent)">${escapeHtml(shortDate(d.label))}</text>`;
       return;
     }
     const x = xFor(i) - barW/2, h = hFor(d.total), y = padTop + chartH - h;
-    const above = d.total >= avg;
-    const color = above ? 'var(--ok)' : 'var(--warn)';
+    const color = chartPointColor(days,i,!!groupedDays,avg);
     bars += `
       <g>
         <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="8" fill="${color}" opacity="0.85" style="filter:drop-shadow(0 0 6px ${color})"/>
         <text x="${x+barW/2}" y="${y-10}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="14" fill="var(--text)">${d.total}</text>
-        <text x="${x+barW/2}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">${d.weekday}</text>
-        <text x="${x+barW/2}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>
+        ${groupedDays
+          ? `<text x="${x+barW/2}" y="${padTop+chartH+31}" text-anchor="middle" font-family="var(--display)" font-weight="800" font-size="13" fill="var(--accent)">${escapeHtml(shortDate(d.label))}</text>`
+          : `<text x="${x+barW/2}" y="${padTop+chartH+21}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="11.5" fill="var(--accent)">${d.weekday}</text>
+             <text x="${x+barW/2}" y="${padTop+chartH+35}" text-anchor="middle" font-family="var(--mono)" font-size="9.5" fill="var(--text-dim)">${escapeHtml(shortDate(d.label))}</text>`}
       </g>`;
   });
 
@@ -1528,6 +1499,11 @@ function renderLeadsTable(){
     if(leadsFilter === 'Реклама'){ rows = rows.filter(l => l.type === 'Реклама'); }
     else{ rows = rows.filter(l => l.type !== 'Реклама' && firstManagerName(l.manager) === leadsFilter); }
   }
+  const countEl = document.getElementById('leadsCount');
+  if(countEl) countEl.textContent = rows.length;
+  const countWrap = document.getElementById('leadsCountWrap');
+  if(countWrap) countWrap.style.display = periodMode === 'week' && viewSnapshot?.manual ? 'none' : '';
+  if(!leadsListOpen){ tbody.innerHTML = ''; return; }
   const { key, dir } = leadsSort;
   rows.sort((a,b) => {
     let va = a[key], vb = b[key];
@@ -1539,10 +1515,6 @@ function renderLeadsTable(){
     va = String(va||'').toLowerCase(); vb = String(vb||'').toLowerCase();
     return va.localeCompare(vb, 'ru') * dir;
   });
-  const countEl = document.getElementById('leadsCount');
-  if(countEl) countEl.textContent = rows.length;
-  const countWrap = document.getElementById('leadsCountWrap');
-  if(countWrap) countWrap.style.display = (periodMode === 'month' && (selectedMonth === '2026-08' || selectedMonth === '2026-09')) || (periodMode === 'week' && viewSnapshot?.manual) ? 'none' : '';
   tbody.innerHTML = rows.map((l,i) => `
     <tr>
       <td>${periodMode === 'month' ? i+1 : escapeHtml(l.number)}</td><td>${escapeHtml(l.date)}</td><td>${escapeHtml(l.manager)}</td>
@@ -1645,8 +1617,10 @@ function attachDynamicHandlers(){
   const toggleBtn = document.getElementById('toggleLeadsBtn');
   if(toggleBtn) toggleBtn.addEventListener('click', (e)=>{
     const body = document.getElementById('leadsBody');
-    const open = body.classList.toggle('open');
-    e.target.textContent = open ? 'Скрыть' : 'Показать';
+    leadsListOpen = !leadsListOpen;
+    body.classList.toggle('open',leadsListOpen);
+    e.target.textContent = leadsListOpen ? 'Скрыть' : 'Показать';
+    renderLeadsTable();
   });
 
   document.querySelectorAll('.leads-table th[data-sort]').forEach(th => {
@@ -2011,7 +1985,6 @@ function bindStaticUI(){
   document.getElementById('drawerOverlay').addEventListener('click', ()=>toggleDrawer(false));
   document.getElementById('editModeBtn').addEventListener('click', toggleEditMode);
   document.getElementById('saveWeekBtn').addEventListener('click', saveWeek);
-  document.getElementById('archiveExitBtn').addEventListener('click', ()=>{ setViewing(null); });
   const addBtnStatic = document.getElementById('addManagerBtn');
   if(addBtnStatic) addBtnStatic.addEventListener('click', addManager);
 
