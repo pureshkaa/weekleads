@@ -128,7 +128,7 @@
   body:not(.month-active) .week-nav{display:flex;}
   .week-nav button{width:27px; height:27px; border:1px solid var(--line); border-radius:8px; color:var(--accent); background:var(--panel); cursor:pointer;}
   .week-nav button:disabled{opacity:.35; cursor:default;}
-  .week-nav span{min-width:45px; text-align:center;}
+  .week-nav span{min-width:110px; text-align:center; white-space:nowrap;}
   body.archive-active .week-nav span{padding:7px 11px; border:1px solid var(--accent-2); border-radius:9px; background:color-mix(in srgb, var(--accent-2) 24%, var(--panel)); color:var(--text); font-weight:800; box-shadow:0 0 15px color-mix(in srgb, var(--accent-2) 35%, transparent);}
   body.month-active.edit-active .mgr-row .del,
   body.archive-active.edit-active .mgr-row .del{display:none;}
@@ -699,7 +699,7 @@ async function fetchMonthlyData(){
     monthlyState.error = err.message;
   }
   monthlyState.loading = false;
-  if(periodMode === 'month') renderAll();
+  if(periodMode === 'month' || (periodMode === 'week' && viewSnapshot)) renderAll();
 }
 function setStatus(kind, msg){
   const dot = document.getElementById('statusDot');
@@ -711,10 +711,9 @@ function setStatus(kind, msg){
 }
 
 function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/')[0].trim(); }
-function unsavedLeads(){ return state.leads.filter(l => (Number(l.number)||0) > weekState.lastSavedNumber); }
 function currentWeekLeads(){
   const reportThursday = currentReportThursday();
-  return unsavedLeads().filter(lead=>{
+  return state.leads.filter(lead=>{
     const date = parseSheetDate(lead.date);
     return date && formatIsoDate(nextThursday(date))===reportThursday;
   });
@@ -794,7 +793,7 @@ function currentReportThursday(){
   const now = new Date();
   const localDate = new Date(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()));
   if(formatIsoDate(localDate)>=initialReport) return initialReport;
-  const dates = unsavedLeads().map(lead=>parseSheetDate(lead.date)).filter(Boolean);
+  const dates = state.leads.map(lead=>parseSheetDate(lead.date)).filter(Boolean);
   if(dates.length){
     const first = new Date(Math.min(...dates.map(date=>date.getTime())));
     return formatIsoDate(nextThursday(first));
@@ -867,12 +866,7 @@ function monthTotals(){
 function countsFromSheetWeek(week){
   const counts = {};
   if(week.manual) return (monthConfig.managerFacts || {})[week.reportThursday] || counts;
-  const start = snapshotWeekStart(week);
-  monthlyState.leads.forEach(lead => {
-    const date = parseSheetDate(lead.date);
-    if(!date || weekStartForDate(date) !== start) return;
-    const number = Number(lead.number) || 0;
-    if(!number || number < Number(week.fromNumber) || number > Number(week.toNumber)) return;
+  archivedWeekLeads(week).forEach(lead => {
     const name = lead.type === 'Реклама' ? 'Реклама' : firstManagerName(lead.manager);
     if(name) counts[name] = (counts[name] || 0) + 1;
   });
@@ -902,18 +896,28 @@ function monthlyManagers(){
   return names.filter(Boolean).map(name => ({ name, quota:monthlyQuotaFor(name) }));
 }
 function activeWeekLeads(){
-  if(viewSnapshot){
-    if(viewSnapshot.manual){
-      return monthlyState.leads.filter(lead=>{
-        const date = parseSheetDate(lead.date);
-        return date && formatIsoDate(nextThursday(date))===viewSnapshot.reportThursday;
-      });
-    }
-    const from = Number(viewSnapshot.fromNumber)||0;
-    const to = Number(viewSnapshot.toNumber)||0;
-    return state.leads.filter(l => { const n = Number(l.number)||0; return n >= from && n <= to; });
-  }
+  if(viewSnapshot) return archivedWeekLeads(viewSnapshot);
   return currentWeekLeads();
+}
+function archivedWeekLeads(snapshot){
+  if(!monthlyState.loaded) return [];
+  const reportThursday = reportThursdayForSnapshot(snapshot);
+  const latestSavedThursday = weekState.history.map(enrichedSnapshot)
+    .map(reportThursdayForSnapshot).filter(Boolean).sort().at(-1);
+  // На листе номера начинаются с 1 после сохранения. Для последней сохранённой
+  // недели граница — первая строка текущей недели, включая лиды самого четверга.
+  if(!snapshot.manual && reportThursday === latestSavedThursday && state.leads.length){
+    const first = state.leads[0];
+    const boundary = monthlyState.leads.findIndex(lead=>
+      String(lead.number) === String(first.number) && lead.date === first.date &&
+      lead.manager === first.manager && lead.type === first.type && lead.deal === first.deal);
+    const total = Number(snapshot.total)||0;
+    if(boundary >= total && total > 0) return monthlyState.leads.slice(boundary-total,boundary);
+  }
+  return monthlyState.leads.filter(lead=>{
+    const date = parseSheetDate(lead.date);
+    return date && formatIsoDate(nextThursday(date)) === reportThursday;
+  });
 }
 function activeManagers(){
   if(periodMode === 'month') return monthlyManagers();
@@ -1066,7 +1070,7 @@ function renderPeriodControls(){
   }
   document.getElementById('monthLabel').textContent = monthTitle(selectedMonth);
   renderWeekNavigation();
-  document.getElementById('factPeriodLabel').textContent = periodMode === 'month' ? 'Факт за месяц' : viewSnapshot ? 'Факт недели' : 'Прошедшая неделя';
+  document.getElementById('factPeriodLabel').textContent = periodMode === 'month' ? 'Факт за месяц' : 'Факт недели';
   const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
   document.getElementById('quotaPeriodLabel').textContent = periodMode === 'month'
     ? (selectedMonth === currentMonth || (currentMonth === '2026-09' && selectedMonth === '2026-10') ? 'Текущий месяц' : 'План за месяц') : 'Текущая неделя';
@@ -1080,7 +1084,9 @@ function renderWeekNavigation(){
   const index = selectedIndex >= 0 ? selectedIndex : entries.length-1;
   const current = entries[index];
   const label = document.getElementById('weekLabel');
-  label.textContent = current.key.slice(8,10)+'.'+current.key.slice(5,7);
+  const start = new Date(current.key+'T00:00:00Z');
+  start.setUTCDate(start.getUTCDate()-7);
+  label.textContent = shortDate(formatDateLabel(start))+'–'+current.key.slice(8,10)+'.'+current.key.slice(5,7);
   label.title = current.snapshot ? 'Прошлая неделя · '+current.key : 'Текущая неделя · '+current.key;
   document.getElementById('prevWeekBtn').disabled = index<=0;
   document.getElementById('nextWeekBtn').disabled = index>=entries.length-1;
@@ -1237,7 +1243,8 @@ function monthWeekPoints(){
   return Array.from({length:12},(_,i)=>{
     const date = new Date(start);
     date.setUTCDate(date.getUTCDate()+7*i);
-    const week = date <= latestThursday ? weekForThursday(formatIsoDate(date)) : null;
+    const key = formatIsoDate(date);
+    const week = date <= latestThursday || key === currentReportThursday() ? weekForThursday(key) : null;
     return {label:formatDateLabel(date),date,weekday:'ЧТ',total:week ? Number(week.total)||0 : null,
       ads:week ? Number(week.ads)||0 : null};
   });
@@ -1585,7 +1592,7 @@ function selectWeek(keyOrNull){
   }
   periodMode = 'week';
   renderAll();
-  if(viewSnapshot?.manual && !monthlyState.loaded && !monthlyState.loading) fetchMonthlyData();
+  if(viewSnapshot && !monthlyState.loaded && !monthlyState.loading) fetchMonthlyData();
 }
 function setViewing(savedAtOrNull){
   const snapshot = savedAtOrNull ? weekState.history.find(h=>h.savedAt===savedAtOrNull) : null;
@@ -1832,7 +1839,7 @@ async function saveWeek(){
     if(!confirm('Зафиксировать неделю (' + weekLeads.length + ' лидов) и начать новую? Данные графика больше меняться не будут. Это увидят все, кто открыл эту ссылку.')) return;
   }
   const nums = weekLeads.map(l=>Number(l.number)||0).filter(n=>n>0);
-  const newLastNumber = nums.length ? Math.max(...nums, weekState.lastSavedNumber) : weekState.lastSavedNumber;
+  const newLastNumber = nums.length ? Math.max(...nums) : 0;
   const weekStart = new Date(reportThursday+'T00:00:00Z');
   weekStart.setUTCDate(weekStart.getUTCDate()-7);
   const managerCounts = {};
@@ -1845,7 +1852,7 @@ async function saveWeek(){
     savedAt: new Date().toISOString(),
     weekStart: formatIsoDate(weekStart),
     reportThursday,
-    fromNumber: weekState.lastSavedNumber + 1,
+    fromNumber: nums.length ? Math.min(...nums) : 0,
     toNumber: newLastNumber,
     total: weekLeads.length,
     ads: weekLeads.filter(l=>l.type==='Реклама').length,
@@ -1866,6 +1873,7 @@ async function saveWeek(){
   weekBackups[snapshot.savedAt] = {weekStart:snapshot.weekStart,reportThursday:snapshot.reportThursday,managerCounts};
   try{ localStorage.setItem(MONTH_BACKUP_KEY, JSON.stringify(weekBackups)); }catch(e){ console.warn('Не удалось сохранить локальную копию итогов недели', e); }
   await fetchData();
+  await fetchMonthlyData();
 }
 
 /* ===== Настройки блоков ===== */
@@ -1953,7 +1961,7 @@ function toggleDrawer(open){
   if(open) renderHistory();
 }
 function bindStaticUI(){
-  document.getElementById('refreshBtn').addEventListener('click', fetchData);
+  document.getElementById('refreshBtn').addEventListener('click', ()=>{ fetchData(); fetchMonthlyData(); });
   document.getElementById('weekModeBtn').addEventListener('click', ()=>{
     if(periodMode === 'week') return;
     periodMode = 'week'; renderAll();
