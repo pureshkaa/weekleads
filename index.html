@@ -94,6 +94,15 @@
   .dot.live{background:var(--ok); box-shadow:0 0 0 3px rgba(52,224,161,.16); animation:pulse 2.4s infinite;}
   .dot.err{background:var(--warn);}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(52,224,161,.16);} 50%{box-shadow:0 0 0 6px rgba(52,224,161,.04);}}
+  .freshness-banner{max-width:var(--maxw); margin:0 auto 18px; padding:12px 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; border:1px solid #d6a447; border-radius:12px; background:rgba(214,164,71,.12); color:var(--text); font-family:var(--sans);}
+  .freshness-banner[hidden]{display:none;}
+  .freshness-banner.error{border-color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, var(--panel));}
+  .freshness-banner strong{font-size:14px;}
+  .freshness-banner span{font-size:12px; color:var(--text-dim); flex:1; min-width:220px;}
+  .freshness-banner .btn{color:var(--text); border-color:currentColor;}
+  body.waiting-for-data .period-bar, body.waiting-for-data .layout{display:none;}
+  body.using-cached-data .layout{opacity:.65;}
+  #editModeBtn:disabled, #saveWeekBtn:disabled{opacity:.45; cursor:not-allowed;}
   .icon-btn{
     width:34px; height:34px; border-radius:10px; border:1px solid var(--line);
     background:color-mix(in srgb, var(--panel) 75%, transparent);
@@ -370,10 +379,16 @@
   </div>
 </div>
 
+<div class="freshness-banner" id="freshnessBanner" role="status" aria-live="polite">
+  <strong id="freshnessTitle">Проверяем актуальные данные</strong>
+  <span id="freshnessDetail">Данные появятся после ответа сервера.</span>
+  <button class="btn" id="freshnessRetryBtn">Повторить</button>
+</div>
+
 <div class="layout">
   <!-- Прошедшая неделя (факт) -->
   <div class="dial-card">
-    <div class="dial-label" id="factPeriodLabel">Прошедшая неделя</div>
+    <div class="dial-label" id="factPeriodLabel">Факт недели</div>
     <div class="dial-wrap">
       <svg viewBox="0 0 170 170" width="170" height="170">
         <defs>
@@ -484,12 +499,20 @@ const MANUAL_WEEK_DEFAULTS = {
   '2026-08-06':72, '2026-08-13':115, '2026-08-20':117, '2026-08-27':65,
   '2026-09-03':121, '2026-09-10':49, '2026-09-17':61, '2026-09-24':71
 };
-const INITIAL_DASHBOARD_DATA = {"leads":[{"number":1,"date":"24.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22245032"},{"number":2,"date":"24.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home?leadId=22234160"},{"number":3,"date":"24.09.2026","manager":"Анна","type":"Реклама","deal":"https://crm.klimek.ru/home/22245171"},{"number":4,"date":"24.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22240587"},{"number":5,"date":"24.09.2026","manager":"Анна","type":"Реклама","deal":"https://crm.klimek.ru/home/22245174"},{"number":6,"date":"25.09.2026","manager":"Анна","type":"Реклама","deal":"https://crm.klimek.ru/home/22245186"},{"number":7,"date":"25.09.2026","manager":"Анна","type":"Реклама","deal":"https://crm.klimek.ru/home/22245187"},{"number":8,"date":"25.09.2026","manager":"Лолита/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22239890"},{"number":9,"date":"25.09.2026","manager":"Кристина/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22243850"},{"number":10,"date":"25.09.2026","manager":"Кристина/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22242876"},{"number":11,"date":"25.09.2026","manager":"Лолита/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22235000"},{"number":12,"date":"25.09.2026","manager":"Анна","type":"Реклама","deal":"https://crm.klimek.ru/home/22245188"},{"number":13,"date":"25.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22244562"},{"number":14,"date":"25.09.2026","manager":"Александра/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22243206"},{"number":15,"date":"25.09.2026","manager":"Степан/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22245190"},{"number":16,"date":"25.09.2026","manager":"Александра/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22233648"},{"number":17,"date":"28.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245203"},{"number":18,"date":"28.09.2026","manager":"Кристина/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22244549"},{"number":19,"date":"28.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245206"},{"number":20,"date":"28.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245204"},{"number":21,"date":"28.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245207"},{"number":22,"date":"28.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home?leadId=22239472"},{"number":23,"date":"28.09.2026","manager":"Кристина/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22244382"},{"number":24,"date":"28.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home?leadId=22234898"},{"number":25,"date":"28.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22244304"},{"number":26,"date":"28.09.2026","manager":"Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22235418"},{"number":27,"date":"28.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245210"},{"number":28,"date":"28.09.2026","manager":"Александра/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22229920"},{"number":29,"date":"28.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22245159"},{"number":30,"date":"28.09.2026","manager":"Кристина/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22243128"},{"number":31,"date":"28.09.2026","manager":"Степан/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22245215"},{"number":32,"date":"28.09.2026","manager":"Степан/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22241196"},{"number":33,"date":"28.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22241643"},{"number":34,"date":"29.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22238006"},{"number":35,"date":"29.09.2026","manager":"Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22235868"},{"number":36,"date":"29.09.2026","manager":"Лолита/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22244715"},{"number":37,"date":"29.09.2026","manager":"Лолита/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22242009"},{"number":38,"date":"29.09.2026","manager":"Степан/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22230190"},{"number":39,"date":"29.09.2026","manager":"Кристина/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22221905"},{"number":40,"date":"29.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22243006"},{"number":41,"date":"29.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22241579"},{"number":42,"date":"29.09.2026","manager":"Степан/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22231062"},{"number":43,"date":"29.09.2026","manager":"Степан/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22237318"},{"number":44,"date":"29.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22243006"},{"number":45,"date":"29.09.2026","manager":"Кристина/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/13503217"},{"number":46,"date":"29.09.2026","manager":"Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22242965"},{"number":47,"date":"29.09.2026","manager":"Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22242973"},{"number":48,"date":"29.09.2026","manager":"Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home?leadId=22232130"},{"number":49,"date":"29.09.2026","manager":"Анна","type":"Реклама","deal":"https://crm.klimek.ru/home/22245243"},{"number":50,"date":"29.09.2026","manager":"Анна","type":"Реклама","deal":"https://crm.klimek.ru/home/22245242"},{"number":51,"date":"30.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245248"},{"number":52,"date":"30.09.2026","manager":"Лолита/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/2438579"},{"number":53,"date":"30.09.2026","manager":"Кристина/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22243971"},{"number":54,"date":"30.09.2026","manager":"Кристина/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22223064"},{"number":55,"date":"30.09.2026","manager":"Кристина/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22232113"},{"number":56,"date":"30.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245250"},{"number":57,"date":"30.09.2026","manager":"Кристина/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22219962"},{"number":58,"date":"30.09.2026","manager":"Степан/Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22242004"},{"number":59,"date":"30.09.2026","manager":"Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22243881"},{"number":60,"date":"30.09.2026","manager":"Степан/Георгий","type":"Повтор","deal":"https://crm.klimek.ru/home/22225205"},{"number":61,"date":"30.09.2026","manager":"Анна","type":"Повтор","deal":"https://crm.klimek.ru/home/22243938"},{"number":62,"date":"30.09.2026","manager":"Георгий","type":"Реклама","deal":"https://crm.klimek.ru/home/22245253"}],"managers":[{"name":"Александра","quota":3,"actions":"Рассылка авито, рассылка почта"},{"name":"Георгий","quota":20,"actions":"вапвапвап"},{"name":"Анна","quota":17,"actions":"Попросить выделить время на обзвон"},{"name":"Лолита","quota":5,"actions":"Все ок"},{"name":"Кристина","quota":11,"actions":"Все ок"},{"name":"Виталий","quota":4,"actions":"Узнать, как планирует выполнить квоту"},{"name":"Реклама","quota":10},{"name":"Степан","quota":11}],"updatedAt":"2026-09-30T21:40:13.576Z","lastSavedNumber":0,"notes":{"done":[],"plans":[]},"history":[],"viewing":"2026-07-23T13:12:21.470Z","currentQuotas":{"Александра":3,"Георгий":20,"Анна":17,"Лолита":5,"Кристина":11,"Виталий":4,"Елена":17,"Реклама":10,"Степан":11,"Мл менеджер":11}};
-const DASHBOARD_CACHE_KEY = 'leadsDashboard_lastResponse_v1';
+const DASHBOARD_CACHE_KEY = 'leadsDashboard_lastResponse_v2';
+const DASHBOARD_CACHE_MAX_AGE = 30 * 60 * 1000;
 const MONTH_CONFIG_KEY = 'leadsDashboard_monthConfig_v1';
 function loadLocalJson(key, fallback){
   try{ return JSON.parse(localStorage.getItem(key) || 'null') || fallback; }
   catch(e){ return fallback; }
+}
+function loadRecentDashboard(){
+  const cached = loadLocalJson(DASHBOARD_CACHE_KEY, null);
+  if(!cached || !Number.isFinite(cached.cachedAt) || !cached.data) return null;
+  const age = Date.now() - cached.cachedAt;
+  if(age < 0 || age > DASHBOARD_CACHE_MAX_AGE) return null;
+  if(!Array.isArray(cached.data.leads) || !Array.isArray(cached.data.managers)) return null;
+  return cached;
 }
 let monthConfig = loadLocalJson(MONTH_CONFIG_KEY, {manualWeeks:{},quotaOverrides:{},managerFacts:{}});
 let monthConfigDirty = false;
@@ -503,8 +526,13 @@ function loadWeekBackups(){
 let weekBackups = loadWeekBackups();
 
 let state = { leads: [], managers: [] };
-let monthlyState = { leads: [], loaded:false, loading:false, error:null };
-let periodMode = 'month';
+let monthlyState = { leads: [], loaded:false, loading:false, error:null, fetchedAt:0 };
+let periodMode = 'week';
+let dashboardHasData = false;
+let lastDisplayedAt = 0;
+let lastVerifiedAt = 0;
+let freshnessMode = 'loading';
+let dashboardFetchPromise = null;
 let selectedMonth = (() => {
   const now = new Date();
   const current = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
@@ -648,19 +676,68 @@ function applyDashboardData(data,fromCache=false){
   document.getElementById('backendWarnPill').style.display = backendUpToDate ? 'none' : 'flex';
   renderAll();
 }
-async function fetchData(){
+function showFreshness(mode, detail=''){
+  freshnessMode = mode;
+  const banner = document.getElementById('freshnessBanner');
+  const title = document.getElementById('freshnessTitle');
+  const description = document.getElementById('freshnessDetail');
+  const retry = document.getElementById('freshnessRetryBtn');
+  const pill = document.getElementById('updatedAtPill');
+  const dataTime = lastDisplayedAt ? new Date(lastDisplayedAt).toLocaleString('ru-RU') : '';
+  banner.hidden = mode === 'live';
+  banner.classList.toggle('error', mode === 'error');
+  document.body.classList.toggle('waiting-for-data', !dashboardHasData);
+  document.body.classList.toggle('using-cached-data', dashboardHasData && mode !== 'live');
+  document.getElementById('editModeBtn').disabled = mode !== 'live';
+  document.getElementById('saveWeekBtn').disabled = mode !== 'live';
+  if(mode === 'live'){
+    pill.textContent = 'проверено ' + new Date(lastVerifiedAt).toLocaleTimeString('ru-RU');
+    return;
+  }
+  retry.hidden = mode !== 'error';
+  if(mode === 'error'){
+    title.textContent = 'Не удалось обновить данные';
+    description.textContent = (dashboardHasData ? 'Показаны данные от '+dataTime+'. ' : '') + (detail || 'Проверьте соединение и повторите попытку.');
+    pill.textContent = dashboardHasData ? 'данные от '+dataTime : 'нет данных';
+  }else{
+    title.textContent = 'Проверяем актуальные данные';
+    description.textContent = dashboardHasData
+      ? 'Пока показаны данные от '+dataTime+'. После проверки они обновятся автоматически.'
+      : 'Данные появятся после ответа сервера.';
+    pill.textContent = dashboardHasData ? 'проверяем · данные от '+dataTime : 'ожидаем данные';
+  }
+}
+function fetchData(){
+  if(dashboardFetchPromise) return dashboardFetchPromise;
+  dashboardFetchPromise = fetchDashboardOnce().finally(()=>{ dashboardFetchPromise = null; });
+  return dashboardFetchPromise;
+}
+async function fetchDashboardOnce(){
+  if(freshnessMode !== 'live' || Date.now()-lastVerifiedAt > 5*60*1000) showFreshness('loading');
   setStatus('loading');
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(),20000);
   try{
-    const res = await fetch(apiUrl() + '?action=getData&_=' + Date.now());
+    const res = await fetch(apiUrl() + '?action=getData&_=' + Date.now(), {cache:'no-store', signal:controller.signal});
+    if(!res.ok) throw new Error('Сервер: HTTP '+res.status);
     const data = await res.json();
-    if(data.error){ setStatus('error', data.error); return; }
+    if(data.error) throw new Error(data.error);
+    if(!Array.isArray(data.leads) || !Array.isArray(data.managers)) throw new Error('Неверный формат данных');
     applyDashboardData(data);
-    try{ localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(data)); }catch(e){}
+    const now = Date.now();
+    dashboardHasData = true;
+    lastDisplayedAt = now;
+    lastVerifiedAt = now;
+    try{ localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify({cachedAt:now,data})); }catch(e){}
+    showFreshness('live');
     setStatus('live');
-    document.getElementById('updatedAtPill').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU');
     if(periodMode === 'month' && !monthlyState.loaded && !monthlyState.loading) fetchMonthlyData();
   }catch(err){
-    setStatus('error', err.message);
+    const message = err.name === 'AbortError' ? 'Сервер не ответил за 20 секунд. Нажмите «Повторить».' : err.message;
+    setStatus('error',message);
+    showFreshness('error',message);
+  }finally{
+    clearTimeout(timeout);
   }
 }
 
@@ -684,8 +761,9 @@ function parseCsvRows(text){
 async function fetchMonthlyData(){
   if(monthlyState.loading) return;
   monthlyState.loading = true;
+  if(periodMode === 'month') renderLeadsTable();
   try{
-    const res = await fetch(MONTHLY_CSV_URL + '&_=' + Date.now());
+    const res = await fetch(MONTHLY_CSV_URL + '&_=' + Date.now(), {cache:'no-store'});
     if(!res.ok) throw new Error('Google Таблица: HTTP ' + res.status);
     const rows = parseCsvRows(await res.text());
     if(!rows.length || rows[0][1] !== 'Дата' || rows[0][2] !== 'Менеджер') throw new Error('Неожиданный формат листа «Лиды»');
@@ -695,6 +773,7 @@ async function fetchMonthlyData(){
     })).filter(lead => parseSheetDate(lead.date) && lead.manager && lead.type);
     monthlyState.loaded = true;
     monthlyState.error = null;
+    monthlyState.fetchedAt = Date.now();
   }catch(err){
     monthlyState.error = err.message;
   }
@@ -835,8 +914,7 @@ function monthWeeks(){
 function monthLeads(){
   const firstDate = monthChartWindowStart();
   firstDate.setUTCDate(firstDate.getUTCDate()-7);
-  const rows = monthlyState.loaded ? monthlyState.leads : state.leads;
-  return rows.filter(lead=>{
+  return monthlyState.leads.filter(lead=>{
     const date = parseSheetDate(lead.date);
     return date && date >= firstDate;
   });
@@ -1507,10 +1585,22 @@ function renderLeadsTable(){
     else{ rows = rows.filter(l => l.type !== 'Реклама' && firstManagerName(l.manager) === leadsFilter); }
   }
   const countEl = document.getElementById('leadsCount');
-  if(countEl) countEl.textContent = rows.length;
+  if(countEl){
+    countEl.textContent = periodMode === 'month' && !monthlyState.loaded
+      ? (monthlyState.error ? 'ошибка' : 'загрузка')
+      : rows.length + (periodMode === 'month' && monthlyState.error ? ' ⚠' : '');
+    countEl.title = periodMode === 'month' && monthlyState.error
+      ? 'Список лидов не обновился: '+monthlyState.error : '';
+  }
   const countWrap = document.getElementById('leadsCountWrap');
   if(countWrap) countWrap.style.display = periodMode === 'week' && viewSnapshot?.manual ? 'none' : '';
   if(!leadsListOpen){ tbody.innerHTML = ''; return; }
+  if(periodMode === 'month' && !monthlyState.loaded){
+    tbody.innerHTML = `<tr><td colspan="5">${monthlyState.error
+      ? 'Не удалось загрузить полный список лидов. Нажмите «Обновить» вверху.'
+      : 'Загружаем полный список лидов…'}</td></tr>`;
+    return;
+  }
   const { key, dir } = leadsSort;
   rows.sort((a,b) => {
     let va = a[key], vb = b[key];
@@ -1942,7 +2032,11 @@ function warnIfWeekNeedsSaving(){
 function schedulePoll(){
   clearInterval(pollTimer);
   const ms = Number(settings.pollInterval)||0;
-  if(ms > 0){ pollTimer = setInterval(() => { if(!editMode) fetchData(); }, ms); }
+  if(ms > 0){ pollTimer = setInterval(() => {
+    if(editMode || document.hidden) return;
+    fetchData();
+    if(periodMode === 'month' && Date.now()-monthlyState.fetchedAt > 60000) fetchMonthlyData();
+  }, ms); }
 }
 function toggleEditMode(){
   if(!editMode && warnIfWeekNeedsSaving()) return;
@@ -1962,6 +2056,17 @@ function toggleDrawer(open){
 }
 function bindStaticUI(){
   document.getElementById('refreshBtn').addEventListener('click', ()=>{ fetchData(); fetchMonthlyData(); });
+  document.getElementById('freshnessRetryBtn').addEventListener('click', ()=>{ fetchData(); if(periodMode === 'month') fetchMonthlyData(); });
+  document.addEventListener('visibilitychange', ()=>{
+    if(!document.hidden && !editMode){ fetchData(); if(periodMode === 'month') fetchMonthlyData(); }
+  });
+  window.addEventListener('pageshow', event=>{
+    if(!event.persisted) return;
+    periodMode = 'week';
+    renderAll();
+    if(!editMode) fetchData();
+  });
+  window.addEventListener('online', ()=>{ if(!editMode) fetchData(); });
   document.getElementById('weekModeBtn').addEventListener('click', ()=>{
     if(periodMode === 'week') return;
     periodMode = 'week'; renderAll();
@@ -2031,10 +2136,14 @@ buildStarfield();
 applySettings();
 bindStaticUI();
 buildLayout();
-applyDashboardData(loadLocalJson(DASHBOARD_CACHE_KEY, INITIAL_DASHBOARD_DATA),true);
-document.getElementById('updatedAtPill').textContent = 'загружено из памяти';
+const cachedDashboard = loadRecentDashboard();
+if(cachedDashboard){
+  dashboardHasData = true;
+  lastDisplayedAt = cachedDashboard.cachedAt;
+  applyDashboardData(cachedDashboard.data,true);
+}
+showFreshness('loading');
 fetchData();
-if(periodMode === 'month') fetchMonthlyData();
 schedulePoll();
 scheduleChartRollover();
 </script>
