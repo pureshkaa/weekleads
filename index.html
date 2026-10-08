@@ -791,17 +791,9 @@ function setStatus(kind, msg){
 
 function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/')[0].trim(); }
 function currentWeekLeads(){
-  const reportThursday = currentReportThursday();
-  const weekEnd = new Date(reportThursday+'T00:00:00Z');
-  const weekStart = new Date(weekEnd);
-  weekStart.setUTCDate(weekStart.getUTCDate()-7);
-  return state.leads.filter(lead=>{
-    const date = parseSheetDate(lead.date);
-    // До сохранения недели лиды отчётного четверга входят в эту неделю.
-    // После сохранения бэкенд отдаёт новый текущий лист, поэтому тот же
-    // календарный четверг может стать началом следующей недели.
-    return date && date >= weekStart && date <= weekEnd;
-  });
+  // Текущий лист уже отделён от прошлой недели нумерацией. Дата четверга
+  // может относиться к любой из двух недель — зависит от смены листа.
+  return state.leads.filter(lead=>Number(lead.number)>0);
 }
 function weekStartForDate(date){
   return formatIsoDate(mostRecentThursday(date));
@@ -842,15 +834,15 @@ function enrichedSnapshot(snapshot){
 function draftWeek(){
   const leads = currentWeekLeads();
   if(!leads.length) return null;
-  const dates = leads.map(l=>parseSheetDate(l.date)).filter(Boolean);
-  const first = dates.length ? new Date(Math.min(...dates.map(d=>d.getTime()))) : new Date();
-  const reportThursday = formatIsoDate(nextThursday(first));
+  const reportThursday = currentReportThursday();
+  const weekStart = new Date(reportThursday+'T00:00:00Z');
+  weekStart.setUTCDate(weekStart.getUTCDate()-7);
   const managerCounts = {};
   leads.forEach(lead => {
     const name = lead.type === 'Реклама' ? 'Реклама' : firstManagerName(lead.manager);
     if(name) managerCounts[name] = (managerCounts[name] || 0) + 1;
   });
-  return {reportThursday,weekStart:weekStartForDate(first),total:leads.length,
+  return {reportThursday,weekStart:formatIsoDate(weekStart),total:leads.length,
     ads:leads.filter(l=>l.type==='Реклама').length,managerCounts,draft:true};
 }
 function weekForThursday(dateKey){
@@ -869,21 +861,24 @@ function weekForThursday(dateKey){
 }
 function currentReportThursday(){
   const savedDates = weekState.history.map(enrichedSnapshot).map(reportThursdayForSnapshot).filter(Boolean).sort();
+  let nextSavedThursday = '';
   if(savedDates.length){
     const next = new Date(savedDates[savedDates.length-1]+'T00:00:00Z');
     next.setUTCDate(next.getUTCDate()+7);
-    return formatIsoDate(next);
+    nextSavedThursday = formatIsoDate(next);
   }
-  const initialReport = '2026-10-01';
-  const now = new Date();
-  const localDate = new Date(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()));
-  if(formatIsoDate(localDate)>=initialReport) return initialReport;
-  const dates = state.leads.map(lead=>parseSheetDate(lead.date)).filter(Boolean);
+  // Первая дата текущих пронумерованных лидов определяет их отчётный
+  // четверг. После очистки номеров новый лист может начаться в тот же день.
+  const dates = currentWeekLeads().map(lead=>parseSheetDate(lead.date)).filter(Boolean);
   if(dates.length){
     const first = new Date(Math.min(...dates.map(date=>date.getTime())));
-    return formatIsoDate(nextThursday(first));
+    const fromCurrentSheet = formatIsoDate(nextThursday(first));
+    return nextSavedThursday > fromCurrentSheet ? nextSavedThursday : fromCurrentSheet;
   }
-  return formatIsoDate(localDate.getUTCDay()===4 ? localDate : nextThursday(localDate));
+  const now = new Date();
+  const localDate = new Date(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()));
+  const fromCalendar = formatIsoDate(nextThursday(localDate));
+  return nextSavedThursday > fromCalendar ? nextSavedThursday : fromCalendar;
 }
 function manualWeekSnapshot(key){
   const total = Object.prototype.hasOwnProperty.call(monthConfig.manualWeeks || {},key)
