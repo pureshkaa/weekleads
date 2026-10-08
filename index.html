@@ -2006,6 +2006,24 @@ function renderBlockList(){
 /* ===== UI общие ===== */
 let pollTimer = null;
 let chartRolloverTimer = null;
+let checkingPageVersion = false;
+async function checkPageVersion(){
+  if(checkingPageVersion || document.hidden || editMode || document.activeElement?.matches('input,textarea,select,[contenteditable]')) return;
+  checkingPageVersion = true;
+  try{
+    const checkUrl = new URL(location.href);
+    checkUrl.searchParams.set('_versionCheck',String(Date.now()));
+    const response = await fetch(checkUrl.toString(),{method:'HEAD',cache:'no-store'});
+    const publishedAt = Date.parse(response.headers.get('last-modified') || '');
+    const loadedAt = Date.parse(document.lastModified);
+    if(response.ok && Number.isFinite(publishedAt) && Number.isFinite(loadedAt) && publishedAt > loadedAt+1000){
+      const latestUrl = new URL(location.href);
+      latestUrl.searchParams.set('v',String(publishedAt));
+      location.replace(latestUrl.toString());
+    }
+  }catch(e){ console.warn('Не удалось проверить версию страницы',e); }
+  finally{ checkingPageVersion = false; }
+}
 function scheduleChartRollover(){
   clearTimeout(chartRolloverTimer);
   const now = new Date();
@@ -2056,10 +2074,14 @@ function toggleDrawer(open){
   if(open) renderHistory();
 }
 function bindStaticUI(){
-  document.getElementById('refreshBtn').addEventListener('click', ()=>{ fetchData(); fetchMonthlyData(); });
+  document.getElementById('refreshBtn').addEventListener('click', ()=>{ checkPageVersion(); fetchData(); fetchMonthlyData(); });
   document.getElementById('freshnessRetryBtn').addEventListener('click', ()=>{ fetchData(); if(periodMode === 'month') fetchMonthlyData(); });
   document.addEventListener('visibilitychange', ()=>{
-    if(!document.hidden && !editMode){ fetchData(); if(periodMode === 'month') fetchMonthlyData(); }
+    if(!document.hidden && !editMode){
+      checkPageVersion();
+      fetchData();
+      if(periodMode === 'month') fetchMonthlyData();
+    }
   });
   window.addEventListener('pageshow', event=>{
     if(!event.persisted) return;
@@ -2147,6 +2169,8 @@ showFreshness('loading');
 fetchData();
 schedulePoll();
 scheduleChartRollover();
+setTimeout(checkPageVersion,10000);
+setInterval(checkPageVersion,120000);
 </script>
 </body>
 </html>
