@@ -792,9 +792,15 @@ function setStatus(kind, msg){
 function firstManagerName(raw){ if(!raw) return ''; return String(raw).split('/')[0].trim(); }
 function currentWeekLeads(){
   const reportThursday = currentReportThursday();
+  const weekEnd = new Date(reportThursday+'T00:00:00Z');
+  const weekStart = new Date(weekEnd);
+  weekStart.setUTCDate(weekStart.getUTCDate()-7);
   return state.leads.filter(lead=>{
     const date = parseSheetDate(lead.date);
-    return date && formatIsoDate(nextThursday(date))===reportThursday;
+    // До сохранения недели лиды отчётного четверга входят в эту неделю.
+    // После сохранения бэкенд отдаёт новый текущий лист, поэтому тот же
+    // календарный четверг может стать началом следующей недели.
+    return date && date >= weekStart && date <= weekEnd;
   });
 }
 function weekStartForDate(date){
