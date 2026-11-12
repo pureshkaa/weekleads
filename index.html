@@ -1376,17 +1376,15 @@ function renderMonthWeekEditor(){
     }).join('')}</div>`;
 }
 
-function chartPointColor(days,index,monthly,average){
-  if(!monthly) return days[index].total >= average ? 'var(--ok)' : 'var(--warn)';
+function chartPointColor(days,index,monthly){
   const previous = days.slice(0,index).reverse().find(day=>day.total !== null);
-  if(!previous) return 'var(--accent)';
+  if(!previous) return monthly ? 'var(--accent)' : 'var(--warn)';
   return days[index].total > previous.total ? 'var(--ok)' : 'var(--warn)';
 }
 
 function renderChartLine(wrap, weekLeads, groupedDays){
   const days = groupedDays || groupByDate(weekLeads);
   const known = days.filter(d=>d.total !== null);
-  const avg = known.reduce((s,d)=>s+d.total,0) / Math.max(1,known.length);
   const maxVal = Math.max(...known.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
 
@@ -1433,7 +1431,7 @@ function renderChartLine(wrap, weekLeads, groupedDays){
       return;
     }
     const x = xFor(i), y = yFor(d.total);
-    const color = chartPointColor(days,i,!!groupedDays,avg);
+    const color = chartPointColor(days,i,!!groupedDays);
     const isLast = i === lastKnownIndex;
     points += `
       <g>
@@ -1470,7 +1468,6 @@ function renderChartLine(wrap, weekLeads, groupedDays){
 function renderChartBar(wrap, weekLeads, groupedDays){
   const days = groupedDays || groupByDate(weekLeads);
   const known = days.filter(d=>d.total !== null);
-  const avg = known.reduce((s,d)=>s+d.total,0) / Math.max(1,known.length);
   const maxVal = Math.max(...known.map(d=>d.total), 1);
   const niceMax = Math.ceil(maxVal * 1.25) || 1;
 
@@ -1497,7 +1494,7 @@ function renderChartBar(wrap, weekLeads, groupedDays){
       return;
     }
     const x = xFor(i) - barW/2, h = hFor(d.total), y = padTop + chartH - h;
-    const color = chartPointColor(days,i,!!groupedDays,avg);
+    const color = chartPointColor(days,i,!!groupedDays);
     bars += `
       <g>
         <rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="8" fill="${color}" opacity="0.85" style="filter:drop-shadow(0 0 6px ${color})"/>
