@@ -499,6 +499,14 @@ const MANUAL_WEEK_DEFAULTS = {
   '2026-08-06':72, '2026-08-13':115, '2026-08-20':117, '2026-08-27':65,
   '2026-09-03':121, '2026-09-10':49, '2026-09-17':61, '2026-09-24':71
 };
+// В архиве нет снимка за 22.10. В исходном листе между сохранёнными
+// неделями 15.10 (73 лида) и 29.10 (79 лидов) остались 86 строк.
+const RECOVERED_WEEK_DEFAULTS = {
+  '2026-10-22': {total:86,managerCounts:{
+    'Александра':2,'Георгий':21,'Анна':19,'Кристина':11,
+    'Степан':13,'Лолита':10,'Виталий':2,'Реклама':8
+  }}
+};
 const DASHBOARD_CACHE_KEY = 'leadsDashboard_lastResponse_v2';
 const DASHBOARD_CACHE_MAX_AGE = 30 * 60 * 1000;
 const MONTH_CONFIG_KEY = 'leadsDashboard_monthConfig_v1';
@@ -845,10 +853,19 @@ function draftWeek(){
   return {reportThursday,weekStart:formatIsoDate(weekStart),total:leads.length,
     ads:leads.filter(l=>l.type==='Реклама').length,managerCounts,draft:true};
 }
+function recoveredWeek(dateKey){
+  const source = RECOVERED_WEEK_DEFAULTS[dateKey];
+  if(!source) return null;
+  const overrides = (monthConfig.managerFacts || {})[dateKey] || {};
+  const managerCounts = {...source.managerCounts,...overrides};
+  return {reportThursday:dateKey,total:source.total,
+    ads:Number(managerCounts['Реклама'])||0,managerCounts,recovered:true};
+}
 function weekForThursday(dateKey){
   const saved = weekState.history.map(enrichedSnapshot).filter(w=>reportThursdayForSnapshot(w)===dateKey);
   const draft = draftWeek();
-  const base = saved.length ? saved[saved.length-1] : draft && draft.reportThursday === dateKey ? draft : null;
+  const base = saved.length ? saved[saved.length-1]
+    : draft && draft.reportThursday === dateKey ? draft : recoveredWeek(dateKey);
   const manual = monthConfig.manualWeeks || {};
   if(Object.prototype.hasOwnProperty.call(manual,dateKey)){
     return {...base,reportThursday:dateKey,total:Number(manual[dateKey])||0,
@@ -929,6 +946,7 @@ function monthTotals(){
     total += Number(week.total) || 0;
     ads += Number(week.ads) || 0;
     if(week.manualOverride && Number(week.total) !== Number(week.baseTotal)) breakdownComplete = false;
+    if(week.recovered && Object.values(week.managerCounts).reduce((sum,n)=>sum+(Number(n)||0),0) !== Number(week.total)) breakdownComplete = false;
     if(week.manual){
       const facts = (monthConfig.managerFacts || {})[week.reportThursday] || {};
       if(Object.keys(MONTHLY_QUOTA_PER_THURSDAY).some(name=>facts[name] === undefined)) breakdownComplete = false;
@@ -1365,7 +1383,7 @@ function renderMonthWeekEditor(){
   box.innerHTML = `<div style="font-weight:700;">Итоги по неделям — ${escapeHtml(monthTitle(selectedMonth))}</div>
     <div class="month-week-editor-grid">${thursdaysForMonth(selectedMonth).map(key=>{
       const week = weekForThursday(key);
-      const facts = (monthConfig.managerFacts || {})[key] || {};
+      const facts = week?.recovered ? week.managerCounts : (monthConfig.managerFacts || {})[key] || {};
       return `<div class="month-week-card"><label>${escapeHtml(formatDateLabel(new Date(key+'T00:00:00Z')).slice(0,5))}
         <input class="month-week-input" data-date="${key}" type="number" min="0" step="1"
           value="${week ? Number(week.total)||0 : ''}" placeholder="—"></label>
